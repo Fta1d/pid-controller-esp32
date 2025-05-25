@@ -35,49 +35,28 @@
 #define UART_NUM                UART_NUM_2
 #define UART_BUFF_SIZE          1024
 
-#define PID_INTERRUPT_X_MOVE    BIT0
-#define PID_INTERRUPT_Y_MOVE    BIT1
-#define PID_INTERRUPT_X_STOP    BIT2
-#define PID_INTERRUPT_Y_STOP    BIT3
-#define PID_INTERRUPT_ALL_STOP  BIT4
-
-#define PID_UPDATE_PERIOD       10
-#define POSITION_TOLERANCE      0
-
-const float Kp = 1.0;
-const float Ki = 0.1;
-const float Kd = 0.1;
-const float integral_limit = 1000.0; 
-
 volatile uint16_t current_encoder_pos;
-EventGroupHandle_t pid_interrupt_group;
-SemaphoreHandle_t pid_wake_semaphore;
-bool system_brake_engaged = false;
-
-typedef enum {
-    MOTOR_STOP,          // Both channels = 0 (free rotaion)
-    MOTOR_FORWARD,       // IN1=PWM, IN2=0
-    MOTOR_REVERSE,       // IN1=0, IN2=PWM  
-    MOTOR_BRAKE          // IN1=MAX, IN2=MAX (magnetic break)
-} motor_state_t;
-
-typedef struct {
-    float prev_err;
-    float integral;
-    int16_t target_pos;
-    int16_t current_pos;
-    uint32_t last_time;
-    bool active;
-} pid_controller_t;
 
 typedef struct {
     ledc_channel_t in1_channel;
     ledc_channel_t in2_channel;
-    pid_controller_t pid;
     volatile int16_t encoder_pos; 
-    char name[4];
+    char name[2];
 } motor_t;
 
+typedef struct {
+    bool left_pressed;
+    bool right_pressed;
+    bool down_pressed;
+    bool up_pressed;
+} controls_t;
+
+controls_t controls = {
+    .left_pressed   = false,
+    .right_pressed  = false,
+    .down_pressed = false,
+    .up_pressed     = false
+};
 
 motor_t motor_x = {
     .in1_channel = X_IN1_LEDC_CHANNEL,

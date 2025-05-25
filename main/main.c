@@ -70,313 +70,61 @@ void configure_pwm() {
     ledc_fade_func_install(0);
 }
 
-void motor_set_state(motor_t *motor, motor_state_t state, uint32_t pwm_value) {
-    ledc_channel_t ch1 = motor->in1_channel;
-    ledc_channel_t ch2 = motor->in2_channel;
-    
-    switch (state) {
-        case MOTOR_STOP:
-            // Free rotation - both channels = 0
-            ledc_set_duty(LEDC_MODE, ch1, 0);
-            ledc_set_duty(LEDC_MODE, ch2, 0);
-            break;
-            
-        case MOTOR_FORWARD:
-            // Move forward - IN1=PWM, IN2=0
-            if (pwm_value < MIN_PWM_DUTY) pwm_value = 0;
-            if (pwm_value > MAX_PWM_DUTY) pwm_value = MAX_PWM_DUTY;
-            
-            ledc_set_duty(LEDC_MODE, ch1, pwm_value);
-            ledc_set_duty(LEDC_MODE, ch2, 0);
-            break;
-            
-        case MOTOR_REVERSE:
-            // Move reverse - IN1=0, IN2=PWM
-            if (pwm_value < MIN_PWM_DUTY) pwm_value = 0;
-            if (pwm_value > MAX_PWM_DUTY) pwm_value = MAX_PWM_DUTY;
-            
-            ledc_set_duty(LEDC_MODE, ch1, 0);
-            ledc_set_duty(LEDC_MODE, ch2, pwm_value);
-            break;
-            
-        case MOTOR_BRAKE:
-            // MAGNETIC BREAK
-            ledc_set_duty(LEDC_MODE, ch1, MAX_PWM_DUTY);
-            ledc_set_duty(LEDC_MODE, ch2, MAX_PWM_DUTY);
-            break;
-    }
-    
-    ledc_update_duty(LEDC_MODE, ch1);
-    ledc_update_duty(LEDC_MODE, ch2);
+void motor_control_task(void *pvParameters) {
+
 }
 
-void motor_set_pwm(motor_t *motor, float output) {
-    if (system_brake_engaged) {
-        motor_set_state(motor, MOTOR_BRAKE, 0);
-        return;
+void process_input(char *input) {
+    uint16_t len = strcspn(input, "\r\n");
+    char *parsed_input = (char *)malloc(len + 1);
+    
+    memcpy(parsed_input, input, len);
+    parsed_input[len] = '\0';
+
+    char *ptr = parsed_input;
+    
+    if (*ptr != 0x30) {
+        controls.up_pressed = true;
+        // ESP_LOGI("pars", "Up pressed");
+    } else if (*ptr) {
+        // ESP_LOGI("pars", "Up released");
+        controls.up_pressed = false;
     }
 
-    if (output > MAX_PWM_DUTY) output = MAX_PWM_DUTY;
-    if (output < -MAX_PWM_DUTY) output = -MAX_PWM_DUTY;
-    
-    uint32_t duty = (uint32_t)fabs(output);
-    
-    if (duty < MIN_PWM_DUTY) {
-        motor_set_state(motor, MOTOR_STOP, 0);
-    } else if (output > 0) {
-        motor_set_state(motor, MOTOR_FORWARD, duty);
-    } else {
-        motor_set_state(motor, MOTOR_REVERSE, duty);
-    }
-}
-
-void software_interrupt_brake(void) {
-    ESP_LOGI("BRAKE", "SOFTWARE INTERRUPT: MAGNETIC BRAKE ENGAGED");
-
-    motor_x.pid.active = false;
-    motor_y.pid.active = false;
-
-    system_brake_engaged = true;
-    motor_set_state(&motor_x, MOTOR_BRAKE, 0);
-    motor_set_state(&motor_y, MOTOR_BRAKE, 0);
-    
-    xSemaphoreGive(pid_wake_semaphore);
-}
-
-void software_interrupt_release_brake(void) {
-    ESP_LOGI("BRAKE", "SOFTWARE INTERRUPT: BRAKE RELEASED");
-
-    system_brake_engaged = false;
-    motor_set_state(&motor_x, MOTOR_STOP, 0);
-    motor_set_state(&motor_y, MOTOR_STOP, 0);
-}
-
-void software_interrupt_move_x(int16_t target_position) {
-    ESP_LOGI("ISR", "SOFTWARE INTERRUPT: Move X to %d", target_position);
-
-    if (system_brake_engaged) {
-        software_interrupt_release_brake();
+    if (*(ptr + 1) != 0x30) {
+        controls.down_pressed = true;
+        // ESP_LOGI("pars", "Down pressed");
+    } else if (*(ptr + 1)){
+        // ESP_LOGI("pars", "Down released");
+        controls.down_pressed = false;
     }
 
-    motor_x.pid.target_pos = target_position;
-    motor_x.pid.current_pos = motor_x.encoder_pos;
-    motor_x.pid.active = true;
-    motor_x.pid.integral = 0;
-    motor_x.pid.prev_err = 0;
-    motor_x.pid.last_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-
-    xEventGroupSetBits(pid_interrupt_group, PID_INTERRUPT_X_MOVE);
-    xSemaphoreGive(pid_wake_semaphore);
-}
-
-void software_interrupt_move_y(int16_t target_position) {
-    ESP_LOGI("ISR", "SOFTWARE INTERRUPT: Move Y to %d", target_position);
-
-    if (system_brake_engaged) {
-        software_interrupt_release_brake();
-    }
-    
-    motor_y.pid.target_pos = target_position;
-    motor_y.pid.current_pos = motor_y.encoder_pos;
-    motor_y.pid.active = true;
-    motor_y.pid.integral = 0;
-    motor_y.pid.prev_err = 0;
-    motor_y.pid.last_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    
-    xEventGroupSetBits(pid_interrupt_group, PID_INTERRUPT_Y_MOVE);
-    xSemaphoreGive(pid_wake_semaphore);
-}
-
-void software_interrupt_stop(void) {
-    ESP_LOGI("ISR", "SOFTWARE INTERRUPT: STOP (free coast)");
-    
-    motor_x.pid.active = false;
-    motor_y.pid.active = false;
-
-    if (!system_brake_engaged) {
-        motor_set_state(&motor_x, MOTOR_STOP, 0);
-        motor_set_state(&motor_y, MOTOR_STOP, 0);
-    }
-    
-    xEventGroupSetBits(pid_interrupt_group, PID_INTERRUPT_ALL_STOP);
-    xSemaphoreGive(pid_wake_semaphore);
-}
-
-
-
-float calculate_pid(motor_t *motor) {
-    uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
-    float dt = (current_time - motor->pid.last_time) / 1000.0;
-    if (dt <= 0) dt = 0.01;
-    
-    float error = motor->pid.target_pos - motor->pid.current_pos;
-    
-    float proportional = Kp * error;
-    
-    motor->pid.integral += error * dt;
-    if (motor->pid.integral > integral_limit) motor->pid.integral = integral_limit;
-    if (motor->pid.integral < -integral_limit) motor->pid.integral = -integral_limit;
-    float integral = Ki * motor->pid.integral;
-    
-    float derivative = Kd * (error - motor->pid.prev_err) / dt;
-    
-    motor->pid.prev_err = error;
-    motor->pid.last_time = current_time;
-    
-    return proportional + integral + derivative;
-}
-
-void process_cmd(char *command) {
-    uint16_t len = strcspn(command, "\r\n");
-    char *parsed_cmd = (char *)malloc(len + 1);
-    char error_msg[] = "> Invalid command!\r\n> ";
-    
-    memcpy(parsed_cmd, command, len);
-    parsed_cmd[len] = '\0';
-    
-    ESP_LOGI("INFO", "Parsing command: %s", parsed_cmd);
-
-    if (strcmp(parsed_cmd, "brake") == 0) {
-        software_interrupt_brake();
-        uart_write_bytes(UART_NUM, "> Magnetic brake engaged!\r\n> ", 31);
-    }
-    else if (strcmp(parsed_cmd, "release") == 0) {
-        software_interrupt_release_brake();
-        uart_write_bytes(UART_NUM, "> Brake released!\r\n> ", 23);
+    if (*(ptr + 2) != 0x30) {
+        controls.left_pressed = true;
+        // ESP_LOGI("pars", "Left pressed"); 
+    } else if (*(ptr + 2)){
+        // ESP_LOGI("pars", "Left released"); 
+        controls.left_pressed = false;
     }
 
-    else if (strcmp(parsed_cmd, "stop") == 0) {
-        software_interrupt_stop();
-        uart_write_bytes(UART_NUM, "> Motors stopped\r\n> ", 20);
+    if (*(ptr + 3) != 0x30) {
+        controls.right_pressed = true;
+        // ESP_LOGI("pars", "Right pressed");
+    } else if (*(ptr + 3)) {
+        // ESP_LOGI("pars", "Right released");
+        controls.right_pressed = false;
     }
-    else if (strcmp(parsed_cmd, "status") == 0) {
-        char status[200];
-        const char* brake_status = system_brake_engaged ? "BRAKE" : "FREE";
-        
-        snprintf(status, sizeof(status), 
-                "> X: pos=%d->%d (%s) | Y: pos=%d->%d (%s) | System: %s\r\n> ",
-                motor_x.encoder_pos, motor_x.pid.target_pos, motor_x.pid.active ? "ON" : "OFF",
-                motor_y.encoder_pos, motor_y.pid.target_pos, motor_y.pid.active ? "ON" : "OFF",
-                brake_status);
-        uart_write_bytes(UART_NUM, status, strlen(status));
-    }
-    else if (strchr(parsed_cmd, ':')) {
-        char *motor = strtok(parsed_cmd, ":");
-        char *pos_str = strtok(NULL, ":");
-        
-        if (motor && pos_str) {
-            int16_t pos = (int16_t)atoi(pos_str);
-            
-            if (strcmp(motor, "x") == 0) {
-                software_interrupt_move_x(pos);  
-                char response[50];
-                snprintf(response, sizeof(response), "> X -> %d\r\n> ", pos);
-                uart_write_bytes(UART_NUM, response, strlen(response));
-            }
-            else if (strcmp(motor, "y") == 0) {
-                software_interrupt_move_y(pos); 
-                char response[50];
-                snprintf(response, sizeof(response), "> Y -> %d\r\n> ", pos);
-                uart_write_bytes(UART_NUM, response, strlen(response));
-            }
-            else {
-                uart_write_bytes(UART_NUM, error_msg, strlen(error_msg));
-            }
-        } else {
-            uart_write_bytes(UART_NUM, error_msg, strlen(error_msg));
-        }
-    } else {
-        uart_write_bytes(UART_NUM, error_msg, strlen(error_msg));
-    }
-    
-    free(parsed_cmd);
-}
 
+    ESP_LOGI("debug", "%s %d", parsed_input, strlen(parsed_input));
+    // uart_write_bytes(UART_NUM, parsed_input, strlen(parsed_input));
 
-void pid_controller_task(void *pvParameters) {
-    EventBits_t interrupt_bits;
-    
-    ESP_LOGI("INFO", "PID Controller sleeping, waiting for software interrupts...");
-    
-    while (1) {
-        if (xSemaphoreTake(pid_wake_semaphore, portMAX_DELAY) == pdTRUE) {
-
-            while (xSemaphoreTake(pid_wake_semaphore, 0) == pdTRUE) {
-                // Clearing accumulated semaphore signals
-            }
-
-            interrupt_bits = xEventGroupGetBits(pid_interrupt_group);
-            
-            ESP_LOGI("INFO", "PID Controller WOKEN by software interrupt! Bits: 0x%02lX", interrupt_bits);
-
-            if (interrupt_bits == 0) {
-                ESP_LOGI("INFO", "No active interrupt bits, going back to sleep...");
-                continue;
-            }
-
-            if (interrupt_bits & PID_INTERRUPT_X_MOVE) {
-                ESP_LOGI("INFO", "Processing X MOVE interrupt");
-            }
-            if (interrupt_bits & PID_INTERRUPT_Y_MOVE) {
-                ESP_LOGI("INFO", "Processing Y MOVE interrupt");
-            }
-            if (interrupt_bits & PID_INTERRUPT_ALL_STOP) {
-                ESP_LOGI("INFO", "Processing EMERGENCY STOP interrupt");
-                xEventGroupClearBits(pid_interrupt_group, PID_INTERRUPT_ALL_STOP);
-                continue;
-            }
-
-            while (motor_x.pid.active || motor_y.pid.active) {
-
-                if (motor_x.pid.active) {
-                    motor_x.pid.current_pos = motor_x.encoder_pos; 
-                    float error_x = motor_x.pid.target_pos - motor_x.pid.current_pos;
-                    
-                    if (fabs(error_x) <= POSITION_TOLERANCE) {
-                        motor_x.pid.active = false;
-                        motor_set_pwm(&motor_x, 0);
-                        ESP_LOGI("INFO", "Motor X reached target: %d", motor_x.pid.target_pos);
-                    } else {
-                        float output_x = calculate_pid(&motor_x);
-                        motor_set_pwm(&motor_x, output_x);
-                    }
-                    // ESP_LOGI("INFO", "X motor pos: %d", motor_x.pid.current_pos);
-                }
-                
-                if (motor_y.pid.active) {
-                    motor_y.pid.current_pos = motor_y.encoder_pos; // REAL ENCODER READ HERE !!!!!!!!!
-                    float error_y = motor_y.pid.target_pos - motor_y.pid.current_pos;
-                    
-                    if (fabs(error_y) <= POSITION_TOLERANCE) {
-                        motor_y.pid.active = false;
-                        motor_set_pwm(&motor_y, 0);
-                        ESP_LOGI("INFO", "Motor Y reached target: %d", motor_y.pid.target_pos);
-                    } else {
-                        float output_y = calculate_pid(&motor_y);
-                        motor_set_pwm(&motor_y, output_y);
-                    }
-                    // ESP_LOGI("INFO", "Y motor pos: %d", motor_y.pid.current_pos);
-                }
-
-                vTaskDelay(pdMS_TO_TICKS(PID_UPDATE_PERIOD));
-            }
-            
-            xEventGroupClearBits(pid_interrupt_group, 0xFF);
-            ESP_LOGI("INFO", "All motors stopped. PID Controller going to sleep...");
-        }
-    }
+    free(parsed_input);
 }
 
 void uart_task(void *pvParameters) {
     const char* welcome_msg = "\r\n=== ESP32 PWM Controller ===\r\n> ";
-    const char* help = "Commands:\r\n"
-                    "  x:pos, y:pos - move motors (max speed, auto-releases brake)\r\n"
-                    "  brake - engage magnetic brake\r\n"
-                    "  release - release brake\r\n"
-                    "  stop - stop motors (free coast)\r\n"
-                    "  status - show status\r\n> ";
+
     uart_write_bytes(UART_NUM, welcome_msg, strlen(welcome_msg));
-    uart_write_bytes(UART_NUM, help, strlen(help));
 
     uint8_t data[UART_BUFF_SIZE];
 
@@ -385,29 +133,9 @@ void uart_task(void *pvParameters) {
         data[len] = '\0';
 
         if (len) {
-            ESP_LOGI("UART", "%s", (char *)data);
-            process_cmd((char *)data);
+            // ESP_LOGI("UART", "%s", (char *)data);
+            process_input((char *)data);
         }
-
-        vTaskDelay(pdMS_TO_TICKS(30));
-    }
-}
-
-void encoder_simulation_task(void *pvParameters) {
-    while (1) {
-        if (motor_x.pid.active) {
-            int16_t error = motor_x.pid.target_pos - motor_x.encoder_pos;
-            if (error > 1) motor_x.encoder_pos += 2;
-            else if (error < -1) motor_x.encoder_pos -= 2;
-        }
-        
-        if (motor_y.pid.active) {
-            int16_t error = motor_y.pid.target_pos - motor_y.encoder_pos;
-            if (error > 1) motor_y.encoder_pos += 2;
-            else if (error < -1) motor_y.encoder_pos -= 2;
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(50));
     }
 }
 
@@ -415,14 +143,5 @@ void app_main(void) {
     configure_pwm();
     configure_uart();
 
-    pid_interrupt_group = xEventGroupCreate();
-    pid_wake_semaphore = xSemaphoreCreateBinary();
-
-    motor_x.pid.active = false;
-    motor_y.pid.active = false;
-
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL);
-    xTaskCreatePinnedToCore(pid_controller_task, "pid_controller", 8192, NULL, 5, NULL, 1);
-    xTaskCreate(encoder_simulation_task, "encoder_sim", 2048, NULL, 1, NULL); 
-
 }
