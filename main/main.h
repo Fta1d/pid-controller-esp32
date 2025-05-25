@@ -2,7 +2,7 @@
 #define MAIN_H
 
 #include <string.h>
-#include <math.h>
+#include <stdatomic.h>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "driver/ledc.h"
@@ -17,10 +17,10 @@
 #define Y_IN1_LEDC_CHANNEL      LEDC_CHANNEL_2
 #define Y_IN2_LEDC_CHANNEL      LEDC_CHANNEL_3
 
-#define X_MOTOR_IN1_PIN         GPIO_NUM_21
-#define X_MOTOR_IN2_PIN         GPIO_NUM_22
-#define Y_MOTOR_IN1_PIN         GPIO_NUM_23
-#define Y_MOTOR_IN2_PIN         GPIO_NUM_25
+#define X_MOTOR_IN1_PIN         GPIO_NUM_5
+#define X_MOTOR_IN2_PIN         GPIO_NUM_21
+#define Y_MOTOR_IN1_PIN         GPIO_NUM_22
+#define Y_MOTOR_IN2_PIN         GPIO_NUM_23
 
 #define LEDC_TIMER              LEDC_TIMER_0
 #define LEDC_CLK                LEDC_APB_CLK
@@ -35,7 +35,7 @@
 #define UART_NUM                UART_NUM_2
 #define UART_BUFF_SIZE          1024
 
-volatile uint16_t current_encoder_pos;
+const int ACCEL_TIME_MS = 100; 
 
 typedef struct {
     ledc_channel_t in1_channel;
@@ -45,10 +45,10 @@ typedef struct {
 } motor_t;
 
 typedef struct {
-    bool left_pressed;
-    bool right_pressed;
-    bool down_pressed;
-    bool up_pressed;
+    _Atomic bool left_pressed;
+    _Atomic bool right_pressed;
+    _Atomic bool down_pressed;
+    _Atomic bool up_pressed;
 } controls_t;
 
 controls_t controls = {

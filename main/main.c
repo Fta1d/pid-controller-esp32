@@ -71,8 +71,70 @@ void configure_pwm() {
 }
 
 void motor_control_task(void *pvParameters) {
+    bool y_moving = false;
+    bool x_moving = false;
+    
+    while (1) {
+        bool up = atomic_load_explicit(&controls.up_pressed, memory_order_acquire);
+        bool down = atomic_load_explicit(&controls.down_pressed, memory_order_acquire);
+        bool left = atomic_load_explicit(&controls.left_pressed, memory_order_acquire);
+        bool right = atomic_load_explicit(&controls.right_pressed, memory_order_acquire);
+        
+        // === Y AXIS ===
+        if (up && !down) {
+            ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
+            ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, 0);
+            ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+            ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
+            y_moving = true;
+            
+        } else if (down && !up) {
+            ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, 0);
+            ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
+            ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
+            ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+            y_moving = true;
+            
+        } else {
+            if (y_moving) {
+                ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, MAX_PWM_DUTY);
+                ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, MAX_PWM_DUTY);
+                ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
+                ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
+                y_moving = false;
+            }
+        }
+        
+        // === X AXIS ===
+        if (left && !right) {
+            ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
+            ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, 0);
+            ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+            ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
+            x_moving = true;
+            
+        } else if (right && !left) {
+            ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, 0);
+            ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
+            ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
+            ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+            x_moving = true;
+            
+        } else {
+            if (x_moving) {
+                ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, MAX_PWM_DUTY);
+                ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, MAX_PWM_DUTY);
+                ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
+                ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
+                x_moving = false;
+            }
+        }
 
-}
+        ESP_LOGI("debug", "X1: %d, X2: %d\nY1: %d, Y2: %d", (int)ledc_get_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL));
+        
+        vTaskDelay(pdMS_TO_TICKS(20));
+    }
+} 
 
 void process_input(char *input) {
     uint16_t len = strcspn(input, "\r\n");
@@ -140,8 +202,11 @@ void uart_task(void *pvParameters) {
 }
 
 void app_main(void) {
+    gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
+    gpio_set_level(GPIO_NUM_21, 1);
     configure_pwm();
     configure_uart();
 
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL);
+    xTaskCreate(motor_control_task, "motor_control_task", 8192, NULL, 10, NULL);
 }
