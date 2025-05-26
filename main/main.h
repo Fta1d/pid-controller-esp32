@@ -45,11 +45,11 @@
 #define I2C_MASTER_RX_BUF_DISABLE 0
 #define I2C_MASTER_TIMEOUT_MS   1000
 
-// Encoder I2C addresses (adjust according to your encoders)
+// Encoder I2C addresses 
 #define X_ENCODER_I2C_ADDR      0x36  // AS5600 default address
-#define Y_ENCODER_I2C_ADDR      0x37  // Second encoder (if different address)
+#define Y_ENCODER_I2C_ADDR      0x37  // Second encoder 
 
-// AS5600 registers (common magnetic encoder)
+// AS5600 registers
 #define ENCODER_REG_ANGLE_HIGH  0x0E
 #define ENCODER_REG_ANGLE_LOW   0x0F
 #define ENCODER_REG_RAW_ANGLE_HIGH 0x0C
