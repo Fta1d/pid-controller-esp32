@@ -1,4 +1,5 @@
 #include "main.h"
+#include "as5600.h"
 
 void configure_uart() {
     uart_config_t uart_config = {
@@ -71,9 +72,14 @@ void configure_pwm() {
 }
 
 void motor_control_task(void *pvParameters) {
-    bool y_moving = false;
-    bool x_moving = false;
-    
+    motor_state_t y_state = MOTOR_STOPPED;
+    motor_state_t x_state = MOTOR_STOPPED;
+
+    as5600_config_t config = AS5600_DEFAULT_CONFIG();
+    as5600_handle_t encoder = as5600_init(&config);
+
+    float angle;
+
     while (1) {
         bool up = atomic_load_explicit(&controls.up_pressed, memory_order_acquire);
         bool down = atomic_load_explicit(&controls.down_pressed, memory_order_acquire);
@@ -82,55 +88,94 @@ void motor_control_task(void *pvParameters) {
         
         // === Y AXIS ===
         if (up && !down) {
-            ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
-            ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, 0);
-            ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-            ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
-            y_moving = true;
-            
-        } else if (down && !up) {
-            ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, 0);
-            ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
-            ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
-            ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-            y_moving = true;
-            
-        } else {
-            if (y_moving) {
-                ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, MAX_PWM_DUTY);
-                ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, MAX_PWM_DUTY);
+            if (y_state != MOTOR_FORWARD) {
+                as5600_read_angle_degrees(encoder, &angle);
+                ESP_LOGI("enc//////////////////////", "%f", angle);
+
+                ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, 0);
+                ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, 0);
+
                 ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
                 ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
-                y_moving = false;
+
+                ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, MAX_PWM_DUTY, ACCEL_TIME_MS);
+                ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
+                y_state = MOTOR_FORWARD;
+            }
+        } else if (down && !up) {
+            if (y_state != MOTOR_BACKWARD) {
+                as5600_read_angle_degrees(encoder, &angle);
+                ESP_LOGI("enc////////////////////////", "%f", angle);
+
+                ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, 0);
+                ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, 0);
+
+                ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
+                ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
+
+                ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, MAX_PWM_DUTY, ACCEL_TIME_MS);
+                ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
+                y_state = MOTOR_BACKWARD;
+            }
+        } else {
+            if (y_state == MOTOR_FORWARD || y_state == MOTOR_BACKWARD) {
+                ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, 0);
+                ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, 0);
+                ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
+                ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
+
+                y_state = MOTOR_BRAKING;
             }
         }
         
         // === X AXIS ===
         if (left && !right) {
-            ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
-            ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, 0);
-            ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-            ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
-            x_moving = true;
-            
-        } else if (right && !left) {
-            ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, 0);
-            ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, MAX_PWM_DUTY/2, ACCEL_TIME_MS);
-            ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
-            ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-            x_moving = true;
-            
-        } else {
-            if (x_moving) {
-                ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, MAX_PWM_DUTY);
-                ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, MAX_PWM_DUTY);
+            if (x_state != MOTOR_FORWARD) {
+                as5600_read_angle_degrees(encoder, &angle);
+                ESP_LOGI("enc///////////////////////", "%f", angle);
+
+                ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, 0);
+                ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, 0);
+
                 ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
                 ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
-                x_moving = false;
+
+                ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, MAX_PWM_DUTY, ACCEL_TIME_MS);
+                ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+                
+                x_state = MOTOR_FORWARD;
+            }
+        } else if (right && !left) {
+            if (x_state != MOTOR_BACKWARD) {
+                as5600_read_angle_degrees(encoder, &angle);
+                ESP_LOGI("enc", "%f", angle);
+
+                ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, 0);
+                ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, 0);
+
+                ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
+                ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
+
+                ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, MAX_PWM_DUTY, ACCEL_TIME_MS);
+                ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
+                x_state = MOTOR_BACKWARD;
+            }
+        } else {
+            if (x_state == MOTOR_FORWARD || x_state == MOTOR_BACKWARD) {
+                ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, 0);
+                ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, 0);
+                ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
+                ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
+
+                x_state = MOTOR_BRAKING;
             }
         }
-
-        ESP_LOGI("debug", "X1: %d, X2: %d\nY1: %d, Y2: %d", (int)ledc_get_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL));
+        as5600_read_angle_degrees(encoder, &angle);
+        ESP_LOGI("enc", "%f", angle);
+        // ESP_LOGI("debug", "X1: %d, X2: %d\nY1: %d, Y2: %d", (int)ledc_get_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL));
         
         vTaskDelay(pdMS_TO_TICKS(20));
     }
@@ -202,8 +247,6 @@ void uart_task(void *pvParameters) {
 }
 
 void app_main(void) {
-    gpio_set_direction(GPIO_NUM_21, GPIO_MODE_OUTPUT);
-    gpio_set_level(GPIO_NUM_21, 1);
     configure_pwm();
     configure_uart();
 
