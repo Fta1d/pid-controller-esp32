@@ -7,6 +7,7 @@
 #include "esp_err.h"
 #include "driver/ledc.h"
 #include "driver/uart.h"
+#include "driver/i2c.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
@@ -34,6 +35,25 @@
 
 #define UART_NUM                UART_NUM_2
 #define UART_BUFF_SIZE          1024
+
+// I2C Configuration
+#define I2C_MASTER_PORT         I2C_NUM_0
+#define I2C_MASTER_SCL_IO       GPIO_NUM_18
+#define I2C_MASTER_SDA_IO       GPIO_NUM_19
+#define I2C_MASTER_FREQ_HZ      100000
+#define I2C_MASTER_TX_BUF_DISABLE 0
+#define I2C_MASTER_RX_BUF_DISABLE 0
+#define I2C_MASTER_TIMEOUT_MS   1000
+
+// Encoder I2C addresses (adjust according to your encoders)
+#define X_ENCODER_I2C_ADDR      0x36  // AS5600 default address
+#define Y_ENCODER_I2C_ADDR      0x37  // Second encoder (if different address)
+
+// AS5600 registers (common magnetic encoder)
+#define ENCODER_REG_ANGLE_HIGH  0x0E
+#define ENCODER_REG_ANGLE_LOW   0x0F
+#define ENCODER_REG_RAW_ANGLE_HIGH 0x0C
+#define ENCODER_REG_RAW_ANGLE_LOW  0x0D
 
 #define PID_INTERRUPT_X_MOVE    BIT0
 #define PID_INTERRUPT_Y_MOVE    BIT1
@@ -75,14 +95,15 @@ typedef struct {
     ledc_channel_t in2_channel;
     pid_controller_t pid;
     volatile int16_t encoder_pos; 
+    uint8_t encoder_i2c_addr;
     char name[4];
 } motor_t;
-
 
 motor_t motor_x = {
     .in1_channel = X_IN1_LEDC_CHANNEL,
     .in2_channel = X_IN2_LEDC_CHANNEL,
     .encoder_pos = 0,
+    .encoder_i2c_addr = X_ENCODER_I2C_ADDR,
     .name = "X"
 };
 
@@ -90,7 +111,12 @@ motor_t motor_y = {
     .in1_channel = Y_IN1_LEDC_CHANNEL,
     .in2_channel = Y_IN2_LEDC_CHANNEL,
     .encoder_pos = 0,
+    .encoder_i2c_addr = Y_ENCODER_I2C_ADDR,
     .name = "Y"
 };
+
+// Function declarations
+esp_err_t i2c_master_init(void);
+esp_err_t read_encoder_i2c(uint8_t encoder_addr, int16_t *position);
 
 #endif // MAIN_H

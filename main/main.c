@@ -1,5 +1,83 @@
 #include "main.h"
 
+esp_err_t i2c_master_init(void) {
+    i2c_config_t conf = {
+        .mode = I2C_MODE_MASTER,
+        .sda_io_num = I2C_MASTER_SDA_IO,
+        .sda_pullup_en = GPIO_PULLUP_ENABLE,
+        .scl_io_num = I2C_MASTER_SCL_IO,
+        .scl_pullup_en = GPIO_PULLUP_ENABLE,
+        .master.clk_speed = I2C_MASTER_FREQ_HZ,
+    };
+    
+    esp_err_t err = i2c_param_config(I2C_MASTER_PORT, &conf);
+    if (err != ESP_OK) {
+        ESP_LOGE("I2C", "Failed to configure I2C parameters: %s", esp_err_to_name(err));
+        return err;
+    }
+    
+    err = i2c_driver_install(I2C_MASTER_PORT, conf.mode, 
+                            I2C_MASTER_RX_BUF_DISABLE, I2C_MASTER_TX_BUF_DISABLE, 0);
+    if (err != ESP_OK) {
+        ESP_LOGE("I2C", "Failed to install I2C driver: %s", esp_err_to_name(err));
+        return err;
+    }
+    
+    ESP_LOGI("I2C", "I2C master initialized successfully");
+    return ESP_OK;
+}
+
+esp_err_t read_encoder_i2c(uint8_t encoder_addr, int16_t *position) {
+    uint8_t data[2];
+    esp_err_t ret;
+    
+    i2c_cmd_handle_t cmd = i2c_cmd_link_create();
+    
+    // Start condition
+    i2c_master_start(cmd);
+    
+    // Write encoder address + write bit
+    i2c_master_write_byte(cmd, (encoder_addr << 1) | I2C_MASTER_WRITE, true);
+    
+    // Write register address (angle high byte)
+    i2c_master_write_byte(cmd, ENCODER_REG_ANGLE_HIGH, true);
+    
+    // Restart condition
+    i2c_master_start(cmd);
+    
+    // Write encoder address + read bit
+    i2c_master_write_byte(cmd, (encoder_addr << 1) | I2C_MASTER_READ, true);
+    
+    // Read high byte
+    i2c_master_read_byte(cmd, &data[0], I2C_MASTER_ACK);
+    
+    // Read low byte
+    i2c_master_read_byte(cmd, &data[1], I2C_MASTER_NACK);
+    
+    // Stop condition
+    i2c_master_stop(cmd);
+    
+    // Execute command
+    ret = i2c_master_cmd_begin(I2C_MASTER_PORT, cmd, pdMS_TO_TICKS(I2C_MASTER_TIMEOUT_MS));
+    
+    i2c_cmd_link_delete(cmd);
+    
+    if (ret == ESP_OK) {
+        // Combine high and low bytes (12-bit resolution for AS5600)
+        uint16_t raw_angle = ((uint16_t)data[0] << 8) | data[1];
+        
+        // Convert to signed 16-bit value (adjust scaling as needed)
+        // For AS5600: 4096 counts per full rotation (12-bit)
+        *position = (int16_t)(raw_angle & 0x0FFF);
+        
+        ESP_LOGD("I2C", "Encoder 0x%02X: raw=0x%04X, pos=%d", encoder_addr, raw_angle, *position);
+    } else {
+        ESP_LOGW("I2C", "Failed to read encoder 0x%02X: %s", encoder_addr, esp_err_to_name(ret));
+    }
+    
+    return ret;
+}
+
 void configure_uart() {
     uart_config_t uart_config = {
         .baud_rate           = 115200,
@@ -158,6 +236,12 @@ void software_interrupt_move_x(int16_t target_position) {
         software_interrupt_release_brake();
     }
 
+    // Read current encoder position
+    int16_t current_pos;
+    if (read_encoder_i2c(motor_x.encoder_i2c_addr, &current_pos) == ESP_OK) {
+        motor_x.encoder_pos = current_pos;
+    }
+
     motor_x.pid.target_pos = target_position;
     motor_x.pid.current_pos = motor_x.encoder_pos;
     motor_x.pid.active = true;
@@ -174,6 +258,12 @@ void software_interrupt_move_y(int16_t target_position) {
 
     if (system_brake_engaged) {
         software_interrupt_release_brake();
+    }
+    
+    // Read current encoder position
+    int16_t current_pos;
+    if (read_encoder_i2c(motor_y.encoder_i2c_addr, &current_pos) == ESP_OK) {
+        motor_y.encoder_pos = current_pos;
     }
     
     motor_y.pid.target_pos = target_position;
@@ -201,8 +291,6 @@ void software_interrupt_stop(void) {
     xEventGroupSetBits(pid_interrupt_group, PID_INTERRUPT_ALL_STOP);
     xSemaphoreGive(pid_wake_semaphore);
 }
-
-
 
 float calculate_pid(motor_t *motor) {
     uint32_t current_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
@@ -244,7 +332,6 @@ void process_cmd(char *command) {
         software_interrupt_release_brake();
         uart_write_bytes(UART_NUM, "> Brake released!\r\n> ", 23);
     }
-
     else if (strcmp(parsed_cmd, "stop") == 0) {
         software_interrupt_stop();
         uart_write_bytes(UART_NUM, "> Motors stopped\r\n> ", 20);
@@ -292,7 +379,6 @@ void process_cmd(char *command) {
     free(parsed_cmd);
 }
 
-
 void pid_controller_task(void *pvParameters) {
     EventBits_t interrupt_bits;
     
@@ -329,7 +415,16 @@ void pid_controller_task(void *pvParameters) {
             while (motor_x.pid.active || motor_y.pid.active) {
 
                 if (motor_x.pid.active) {
-                    motor_x.pid.current_pos = motor_x.encoder_pos; 
+                    // Read encoder position only when motor is active
+                    int16_t current_pos;
+                    if (read_encoder_i2c(motor_x.encoder_i2c_addr, &current_pos) == ESP_OK) {
+                        motor_x.encoder_pos = current_pos;
+                        motor_x.pid.current_pos = current_pos;
+                    } else {
+                        ESP_LOGW("PID", "Failed to read X encoder, using last known position");
+                        motor_x.pid.current_pos = motor_x.encoder_pos;
+                    }
+                    
                     float error_x = motor_x.pid.target_pos - motor_x.pid.current_pos;
                     
                     if (fabs(error_x) <= POSITION_TOLERANCE) {
@@ -340,11 +435,19 @@ void pid_controller_task(void *pvParameters) {
                         float output_x = calculate_pid(&motor_x);
                         motor_set_pwm(&motor_x, output_x);
                     }
-                    // ESP_LOGI("INFO", "X motor pos: %d", motor_x.pid.current_pos);
                 }
                 
                 if (motor_y.pid.active) {
-                    motor_y.pid.current_pos = motor_y.encoder_pos; // REAL ENCODER READ HERE !!!!!!!!!
+                    // Read encoder position only when motor is active
+                    int16_t current_pos;
+                    if (read_encoder_i2c(motor_y.encoder_i2c_addr, &current_pos) == ESP_OK) {
+                        motor_y.encoder_pos = current_pos;
+                        motor_y.pid.current_pos = current_pos;
+                    } else {
+                        ESP_LOGW("PID", "Failed to read Y encoder, using last known position");
+                        motor_y.pid.current_pos = motor_y.encoder_pos;
+                    }
+                    
                     float error_y = motor_y.pid.target_pos - motor_y.pid.current_pos;
                     
                     if (fabs(error_y) <= POSITION_TOLERANCE) {
@@ -355,7 +458,6 @@ void pid_controller_task(void *pvParameters) {
                         float output_y = calculate_pid(&motor_y);
                         motor_set_pwm(&motor_y, output_y);
                     }
-                    // ESP_LOGI("INFO", "Y motor pos: %d", motor_y.pid.current_pos);
                 }
 
                 vTaskDelay(pdMS_TO_TICKS(PID_UPDATE_PERIOD));
@@ -368,9 +470,9 @@ void pid_controller_task(void *pvParameters) {
 }
 
 void uart_task(void *pvParameters) {
-    const char* welcome_msg = "\r\n=== ESP32 PWM Controller ===\r\n> ";
+    const char* welcome_msg = "\r\n=== ESP32 PWM Controller with I2C Encoders ===\r\n> ";
     const char* help = "Commands:\r\n"
-                    "  x:pos, y:pos - move motors (max speed, auto-releases brake)\r\n"
+                    "  x:pos, y:pos - move motors (with I2C encoder feedback)\r\n"
                     "  brake - engage magnetic brake\r\n"
                     "  release - release brake\r\n"
                     "  stop - stop motors (free coast)\r\n"
@@ -393,25 +495,14 @@ void uart_task(void *pvParameters) {
     }
 }
 
-void encoder_simulation_task(void *pvParameters) {
-    while (1) {
-        if (motor_x.pid.active) {
-            int16_t error = motor_x.pid.target_pos - motor_x.encoder_pos;
-            if (error > 1) motor_x.encoder_pos += 2;
-            else if (error < -1) motor_x.encoder_pos -= 2;
-        }
-        
-        if (motor_y.pid.active) {
-            int16_t error = motor_y.pid.target_pos - motor_y.encoder_pos;
-            if (error > 1) motor_y.encoder_pos += 2;
-            else if (error < -1) motor_y.encoder_pos -= 2;
-        }
-        
-        vTaskDelay(pdMS_TO_TICKS(50));
-    }
-}
-
 void app_main(void) {
+    // Initialize I2C first
+    esp_err_t ret = i2c_master_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE("MAIN", "Failed to initialize I2C: %s", esp_err_to_name(ret));
+        return;
+    }
+
     configure_pwm();
     configure_uart();
 
@@ -421,8 +512,23 @@ void app_main(void) {
     motor_x.pid.active = false;
     motor_y.pid.active = false;
 
+    // Read initial encoder positions
+    int16_t initial_pos_x, initial_pos_y;
+    if (read_encoder_i2c(motor_x.encoder_i2c_addr, &initial_pos_x) == ESP_OK) {
+        motor_x.encoder_pos = initial_pos_x;
+        ESP_LOGI("MAIN", "Initial X encoder position: %d", initial_pos_x);
+    } else {
+        ESP_LOGW("MAIN", "Failed to read initial X encoder position");
+    }
+    
+    if (read_encoder_i2c(motor_y.encoder_i2c_addr, &initial_pos_y) == ESP_OK) {
+        motor_y.encoder_pos = initial_pos_y;
+        ESP_LOGI("MAIN", "Initial Y encoder position: %d", initial_pos_y);
+    } else {
+        ESP_LOGW("MAIN", "Failed to read initial Y encoder position");
+    }
+
     xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL);
     xTaskCreatePinnedToCore(pid_controller_task, "pid_controller", 8192, NULL, 5, NULL, 1);
-    xTaskCreate(encoder_simulation_task, "encoder_sim", 2048, NULL, 1, NULL); 
 
 }
