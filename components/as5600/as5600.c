@@ -245,6 +245,47 @@ esp_err_t as5600_read_angle_degrees(as5600_handle_t handle, float *degrees)
     return ESP_OK;
 }
 
+esp_err_t as5600_read_angle_degrees_sliding(as5600_handle_t handle, float *degrees, const uint16_t window_size) {
+    static float *samples = NULL;
+    static uint16_t current_window_size = 0;
+    static uint16_t index = 0;
+    static uint16_t count = 0;
+    static float last_sum = 0.0;
+    
+    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "Handle is NULL");
+    ESP_RETURN_ON_FALSE(degrees != NULL, ESP_ERR_INVALID_ARG, TAG, "Degrees pointer is NULL");
+    ESP_RETURN_ON_FALSE(window_size > 0, ESP_ERR_INVALID_ARG, TAG, "Window size must be > 0");
+
+    if (current_window_size != window_size) {
+        if (samples) free(samples);
+        samples = calloc(window_size, sizeof(float));
+        ESP_RETURN_ON_FALSE(samples != NULL, ESP_ERR_NO_MEM, TAG, "Failed to allocate buffer");
+        current_window_size = window_size;
+        index = 0;
+        count = 0;
+        last_sum = 0.0;
+    }
+
+    uint16_t angle;
+    ESP_RETURN_ON_ERROR(as5600_read_angle(handle, &angle), TAG, "Failed to read angle");
+    float new_value = as5600_raw_to_degrees(angle);
+
+    if (count >= window_size) {
+        last_sum -= samples[index]; 
+    }
+    
+    samples[index] = new_value;
+    last_sum += new_value;
+    index = (index + 1) % window_size;
+    
+    if (count < window_size) {
+        count++;
+    }
+    
+    *degrees = last_sum / count;
+    return ESP_OK;
+}
+
 esp_err_t as5600_read_angle_radians(as5600_handle_t handle, float *radians)
 {
     ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "Handle is NULL");

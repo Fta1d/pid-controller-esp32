@@ -261,6 +261,16 @@ esp_err_t as5600_read_angle(as5600_handle_t handle, uint16_t *angle);
 esp_err_t as5600_read_angle_degrees(as5600_handle_t handle, float *degrees);
 
 /**
+ * @brief Read angle in degrees on average (sample rate)
+ * 
+ * @param handle AS5600 handle
+ * @param degrees Pointer to store angle in degrees
+ * @param sample_rate How often do you want to read data
+ * @return ESP_OK on success
+ */
+esp_err_t as5600_read_angle_degrees_sliding(as5600_handle_t handle, float *degrees, const uint16_t sample_rate);
+
+/**
  * @brief Read angle in radians (0-2π)
  * 
  * @param handle AS5600 handle

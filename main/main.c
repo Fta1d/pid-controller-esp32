@@ -173,7 +173,7 @@ void motor_control_task(void *pvParameters) {
                 x_state = MOTOR_BRAKING;
             }
         }
-        as5600_read_angle_degrees(encoder, &angle);
+        as5600_read_angle_degrees_sliding(encoder, &angle, 5);
         ESP_LOGI("enc", "%f", angle);
         // ESP_LOGI("debug", "X1: %d, X2: %d\nY1: %d, Y2: %d", (int)ledc_get_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL), (int)ledc_get_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL));
         
