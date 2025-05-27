@@ -5,9 +5,10 @@
 #include <stdatomic.h>
 #include "esp_log.h"
 #include "esp_err.h"
+#include "driver/gptimer.h"
 #include "driver/ledc.h"
 #include "driver/uart.h"
-#include "driver/i2c.h"
+#include "driver/i2c_master.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
@@ -23,6 +24,8 @@
 #define Y_MOTOR_IN1_PIN             GPIO_NUM_5
 #define Y_MOTOR_IN2_PIN             GPIO_NUM_23
 
+#define TRIGGER_PIN                 GPIO_NUM_15
+
 #define LEDC_TIMER                  LEDC_TIMER_0
 #define LEDC_CLK                    LEDC_APB_CLK
 #define LEDC_MODE                   LEDC_HIGH_SPEED_MODE
@@ -31,31 +34,31 @@
 
 #define PWM_CHANNELS_NUM            4
 #define MAX_PWM_DUTY                4095
-#define MIN_PWM_DUTY                50
+#define MIN_PWM_DUTY                2500
+#define DEFFAULT_DUTY               4095
+#define DUTY_STEP                   100
+
+// I2C CONFIGURATION
+#define X_ENCODER_I2C_PORT          I2C_NUM_0
+#define X_ENCODER_SCL_PIN           GPIO_NUM_22
+#define X_ENCODER_SDA_PIN           GPIO_NUM_21
+
+#define Y_ENCODER_I2C_PORT          I2C_NUM_1  
+#define Y_ENCODER_SCL_PIN           GPIO_NUM_4
+#define Y_ENCODER_SDA_PIN           GPIO_NUM_2
+
+#define I2C_FREQ_HZ                 400000
 
 #define UART_NUM                    UART_NUM_2
 #define UART_BUFF_SIZE              1024
 
-// I2C Configuration
-#define I2C_MASTER_PORT             I2C_NUM_0
-#define I2C_MASTER_SCL_IO           GPIO_NUM_18
-#define I2C_MASTER_SDA_IO           GPIO_NUM_19
-#define I2C_MASTER_FREQ_HZ          100000
-#define I2C_MASTER_TX_BUF_DISABLE   0
-#define I2C_MASTER_RX_BUF_DISABLE   0
-#define I2C_MASTER_TIMEOUT_MS       1000
+#define MS_TO_US(ms) ((ms) * 1000)
 
-// Encoder I2C addresses 
-#define X_ENCODER_I2C_ADDR          0x36  // AS5600 default address
-#define Y_ENCODER_I2C_ADDR          0x37  // Second encoder 
+const int ACCEL_TIME_MS = 100;
 
-// AS5600 registers
-#define ENCODER_REG_ANGLE_HIGH      0x0E
-#define ENCODER_REG_ANGLE_LOW       0x0F
-#define ENCODER_REG_RAW_ANGLE_HIGH  0x0C
-#define ENCODER_REG_RAW_ANGLE_LOW   0x0D
+uint16_t DUTY = DEFFAULT_DUTY;
 
-const int ACCEL_TIME_MS = 100; 
+gptimer_handle_t shot_timer = NULL;
 
 typedef struct {
     ledc_channel_t in1_channel;
@@ -98,5 +101,14 @@ typedef enum {
     MOTOR_BACKWARD,
     MOTOR_BRAKING
 } motor_state_t;
+
+typedef struct {
+    float x_angle;
+    float y_angle;
+    float target_x;
+    float target_y;
+} turret_position_t;
+
+extern turret_position_t turret_pos;
 
 #endif // MAIN_H

@@ -24,10 +24,22 @@ def get_current_state():
     """Повертає поточний стан всіх клавіш як рядок"""
     return key_states['up'] + key_states['down'] + key_states['left'] + key_states['right']
 
+def send_single_char(char):
+    """Відправляє одиночний символ негайно"""
+    message = str(char) + '\n'
+    ser.write(message.encode())
+    timestamp = time.strftime('%H:%M:%S')
+    
+    # Спеціальне відображення для пробілу
+    display_char = "SPACE" if char == ' ' else char
+    print(f"[{timestamp}] Символ: {display_char}")
+
 def on_press(key):
     try:
         with lock:
             changed = False
+            
+            # Обробка стрілок
             if key == keyboard.Key.up and key_states['up'] != 'A':
                 key_states['up'] = 'A'
                 changed = True
@@ -41,8 +53,19 @@ def on_press(key):
                 key_states['right'] = 'C'
                 changed = True
             
+            # Обробка пробілу як спеціальної клавіші
+            elif key == keyboard.Key.space:
+                send_single_char(' ')
+                return  # Не встановлюємо state_changed для символів
+            
+            # Обробка всіх символів (літери, цифри, знаки пунктуації)
+            elif hasattr(key, 'char') and key.char and key.char.isprintable():
+                send_single_char(key.char)
+                return  # Не встановлюємо state_changed для символів
+            
             if changed:
                 state_changed.set()
+                
     except AttributeError:
         pass
 
@@ -51,6 +74,7 @@ def on_release(key):
     try:
         with lock:
             changed = False
+            
             if key == keyboard.Key.up and key_states['up'] != '0':
                 key_states['up'] = '0'
                 changed = True
@@ -70,12 +94,12 @@ def on_release(key):
             
             if changed:
                 state_changed.set()
+                
     except AttributeError:
         pass
 
 def send_data():
     global previous_state
-    
     while running:
         # Чекаємо на зміну стану
         state_changed.wait()
@@ -110,9 +134,12 @@ def send_data():
 sender_thread = threading.Thread(target=send_data, daemon=True)
 sender_thread.start()
 
-print("Керування: стрілки для руху, ESC для виходу")
-print("Формат: [UP, DOWN, LEFT, RIGHT]")
-print("Дані відправляються тільки при зміні стану\n")
+print("Керування:")
+print("- Стрілки для руху (відправляються при зміні стану)")
+print("- ВСІ символи (літери, цифри, знаки) та ПРОБІЛ для команд (відправляються негайно)")
+print("- ESC для виходу")
+print("Формат стрілок: [UP, DOWN, LEFT, RIGHT]")
+print("Дані відправляються тільки при зміни стану\n")
 
 # Запуск слухача клавіатури
 with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
