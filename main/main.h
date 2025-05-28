@@ -3,6 +3,8 @@
 
 #include <string.h>
 #include <stdatomic.h>
+#include <sys/select.h>
+#include <errno.h>
 #include "esp_log.h"
 #include "esp_err.h"
 #include "driver/gptimer.h"
@@ -13,6 +15,12 @@
 #include "freertos/semphr.h"
 #include "freertos/event_groups.h"
 #include "FreeRTOSConfig.h"
+#include "esp_wifi.h"
+#include "esp_event.h"
+#include "nvs_flash.h"
+#include "lwip/sockets.h"
+#include "esp_netif.h"
+
 
 #define X_IN1_LEDC_CHANNEL          LEDC_CHANNEL_0
 #define X_IN2_LEDC_CHANNEL          LEDC_CHANNEL_1
@@ -51,6 +59,13 @@
 
 #define UART_NUM                    UART_NUM_2
 #define UART_BUFF_SIZE              1024
+
+#define WIFI_AP_SSID                "esp32"           
+#define WIFI_AP_PASS                "turret123"              
+#define WIFI_AP_CHANNEL             1                     
+#define WIFI_AP_MAX_CONNECTIONS     4  
+
+#define TCP_PORT                    8080
 
 #define MS_TO_US(ms) ((ms) * 1000)
 

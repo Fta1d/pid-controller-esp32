@@ -1,3 +1,3 @@
 idf_component_register(SRCS "main.c"
                     INCLUDE_DIRS "."
-                    REQUIRES "as5600")
+                    REQUIRES "as5600" nvs_flash esp_wifi esp_netif esp_event lwip)

@@ -5,9 +5,93 @@ turret_position_t turret_pos = {0};
 as5600_handle_t x_encoder = NULL;
 as5600_handle_t y_encoder = NULL;
 
-esp_err_t init_dual_encoders(void) {
-    esp_err_t ret = ESP_OK;
+static bool wifi_ap_started = false;
+static int connected_clients = 0;
+static int tcp_server_socket = -1;
+static int client_socket = -1;
+
+static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base,
+                                  int32_t event_id, void* event_data) {
+    if (event_id == WIFI_EVENT_AP_STACONNECTED) {
+        wifi_event_ap_staconnected_t* event = (wifi_event_ap_staconnected_t*) event_data;
+        connected_clients++;
+        ESP_LOGI("WiFi-AP", "Client connected. Total clients: %d", connected_clients);
+    } else if (event_id == WIFI_EVENT_AP_STADISCONNECTED) {
+        wifi_event_ap_stadisconnected_t* event = (wifi_event_ap_stadisconnected_t*) event_data;
+        connected_clients--;
+        ESP_LOGI("WiFi-AP", "Client disconnected. Total clients: %d", connected_clients);
+    } else if (event_id == WIFI_EVENT_AP_START) {
+        ESP_LOGI("WiFi-AP", "Access Point started successfully!");
+        wifi_ap_started = true;
+    } else if (event_id == WIFI_EVENT_AP_STOP) {
+        ESP_LOGI("WiFi-AP", "Access Point stopped");
+        wifi_ap_started = false;
+    }
+}
+
+esp_err_t wifi_init_ap(void) {
+    esp_err_t ret = nvs_flash_init();
+    if (ret == ESP_ERR_NVS_NO_FREE_PAGES || ret == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        ret = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(ret);
+
+    ESP_ERROR_CHECK(esp_netif_init());
+    ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+    esp_netif_t *ap_netif = esp_netif_create_default_wifi_ap();
+
+    esp_netif_ip_info_t ip_info;
+    IP4_ADDR(&ip_info.ip, 192, 168, 4, 1);        // IP 
+    IP4_ADDR(&ip_info.gw, 192, 168, 4, 1);        // Gateway
+    IP4_ADDR(&ip_info.netmask, 255, 255, 255, 0); 
     
+    ESP_ERROR_CHECK(esp_netif_dhcps_stop(ap_netif));
+    ESP_ERROR_CHECK(esp_netif_set_ip_info(ap_netif, &ip_info));
+    ESP_ERROR_CHECK(esp_netif_dhcps_start(ap_netif));
+
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+
+    ESP_ERROR_CHECK(esp_event_handler_instance_register(WIFI_EVENT,
+                                                        ESP_EVENT_ANY_ID,
+                                                        &wifi_ap_event_handler,
+                                                        NULL,
+                                                        NULL));
+
+    wifi_config_t wifi_config = {
+        .ap = {
+            .ssid = WIFI_AP_SSID,
+            .ssid_len = strlen(WIFI_AP_SSID),
+            .channel = WIFI_AP_CHANNEL,
+            .password = WIFI_AP_PASS,
+            .max_connection = WIFI_AP_MAX_CONNECTIONS,
+            .authmode = WIFI_AUTH_WPA2_PSK,
+            .pmf_cfg = {
+                .required = true,
+            },
+        },
+    };
+
+    if (strlen(WIFI_AP_PASS) == 0) {
+        wifi_config.ap.authmode = WIFI_AUTH_OPEN;
+    }
+
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
+    ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
+    ESP_ERROR_CHECK(esp_wifi_start());
+
+    ESP_LOGI("WiFi-AP", "WiFi Access Point initialized");
+    ESP_LOGI("WiFi-AP", "SSID: %s", WIFI_AP_SSID);
+    ESP_LOGI("WiFi-AP", "Password: %s", WIFI_AP_PASS);
+    ESP_LOGI("WiFi-AP", "IP Address: 192.168.4.1");
+    ESP_LOGI("WiFi-AP", "Connect your device and use IP: 192.168.4.1:%d", TCP_PORT);
+
+    return ESP_OK;
+}
+
+esp_err_t init_dual_encoders(void) {
     ESP_LOGI("encoder", "Initializing dual AS5600 encoders...");
     
     // ========== X ENCODER (I2C0) ==========
@@ -20,10 +104,10 @@ esp_err_t init_dual_encoders(void) {
     };
     
     x_encoder = as5600_init(&x_config);
-    if (x_encoder == NULL) {
-        ESP_LOGE("encoder", "Failed to initialize X encoder (I2C0)");
-        return ESP_FAIL;
-    }
+    // if (x_encoder == NULL) {
+    //     ESP_LOGE("encoder", "Failed to initialize X encoder (I2C0)");
+    //     return ESP_FAIL;
+    // }
     
     ESP_LOGI("encoder", "X encoder initialized on I2C0 (SCL=%d, SDA=%d)", 
              X_ENCODER_SCL_PIN, X_ENCODER_SDA_PIN);
@@ -44,12 +128,12 @@ esp_err_t init_dual_encoders(void) {
     };
     
     y_encoder = as5600_init(&y_config);
-    if (y_encoder == NULL) {
-        ESP_LOGE("encoder", "Failed to initialize Y encoder (I2C1)");
-        as5600_deinit(x_encoder);
-        x_encoder = NULL;
-        return ESP_FAIL;
-    }
+    // if (y_encoder == NULL) {
+    //     ESP_LOGE("encoder", "Failed to initialize Y encoder (I2C1)");
+    //     as5600_deinit(x_encoder);
+    //     x_encoder = NULL;
+    //     return ESP_FAIL;
+    // }
     
     ESP_LOGI("encoder", "Y encoder initialized on I2C1 (SCL=%d, SDA=%d)", 
              Y_ENCODER_SCL_PIN, Y_ENCODER_SDA_PIN);
@@ -146,7 +230,6 @@ void configure_pwm() {
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER
         },
-
         {
             .channel    = X_IN2_LEDC_CHANNEL,
             .duty       = 0,
@@ -155,7 +238,6 @@ void configure_pwm() {
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER
         },
-
         {
             .channel    = Y_IN1_LEDC_CHANNEL,
             .duty       = 0,
@@ -164,7 +246,6 @@ void configure_pwm() {
             .hpoint     = 0,
             .timer_sel  = LEDC_TIMER
         },
-
         {
             .channel    = Y_IN2_LEDC_CHANNEL,
             .duty       = 0,
@@ -207,8 +288,7 @@ void shoot() {
     gptimer_start(shot_timer);
 }
 
-static bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data)
-{
+static bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data) {
     gpio_set_level(TRIGGER_PIN, 0);
     gptimer_stop(timer);
     return false; 
@@ -251,13 +331,13 @@ void motor_control_task(void *pvParameters) {
         
         float x_raw_angle, y_raw_angle;
         
-        if (as5600_read_angle_degrees_sliding(x_encoder, &x_raw_angle, 20) == ESP_OK) {
-            turret_pos.x_angle = x_raw_angle;
-        }
+        // if (as5600_read_angle_degrees_sliding(x_encoder, &x_raw_angle, 20) == ESP_OK) {
+        //     turret_pos.x_angle = x_raw_angle;
+        // }
         
-        if (as5600_read_angle_degrees_sliding(y_encoder, &y_raw_angle, 20) == ESP_OK) {
-            turret_pos.y_angle = y_raw_angle;
-        }
+        // if (as5600_read_angle_degrees_sliding(y_encoder, &y_raw_angle, 20) == ESP_OK) {
+        //     turret_pos.y_angle = y_raw_angle;
+        // }
 
         // === Y AXIS ===
         if (up && !down) {
@@ -319,7 +399,7 @@ void motor_control_task(void *pvParameters) {
             }
         } else if (right && !left) {
             if (x_state != MOTOR_BACKWARD) {
-                ESP_LOGI("motor", "X LEFT: %.2f°", turret_pos.x_angle);
+                ESP_LOGI("motor", "X RIGHT: %.2f°", turret_pos.x_angle);
 
                 ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, 0);
                 ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, 0);
@@ -358,33 +438,25 @@ void process_input(char *input) {
     
     if (*ptr == 'A') {
         controls.up_pressed = true;
-        // ESP_LOGI("pars", "Up pressed");
     } else if (*ptr == 0x30) {
-        // ESP_LOGI("pars", "Up released");
         controls.up_pressed = false;
     }
 
     if (*(ptr + 1) == 'B') {
         controls.down_pressed = true;
-        // ESP_LOGI("pars", "Down pressed");
     } else if (*(ptr + 1) == 0x30){
-        // ESP_LOGI("pars", "Down released");
         controls.down_pressed = false;
     }
 
     if (*(ptr + 2) == 'D') {
         controls.left_pressed = true;
-        // ESP_LOGI("pars", "Left pressed"); 
     } else if (*(ptr + 2) == 0x30){
-        // ESP_LOGI("pars", "Left released"); 
         controls.left_pressed = false;
     }
 
     if (*(ptr + 3) == 'C') {
         controls.right_pressed = true;
-        ESP_LOGI("pars", "Right pressed");
     } else if (*(ptr + 3) == 0x30) {
-        ESP_LOGI("pars", "Right released");
         controls.right_pressed = false;
     }
 
@@ -436,8 +508,7 @@ void process_input(char *input) {
         }
     }
     
-    ESP_LOGI("debug", "%s %d", parsed_input, strlen(parsed_input));
-    // uart_write_bytes(UART_NUM, parsed_input, strlen(parsed_input));
+    // ESP_LOGI("debug", "%s %d", parsed_input, strlen(parsed_input));
 
     free(parsed_input);
 }
@@ -454,13 +525,105 @@ void uart_task(void *pvParameters) {
         data[len] = '\0';
 
         if (len) {
-            // ESP_LOGI("UART", "%s", (char *)data);
             process_input((char *)data);
         }
     }
 }
 
+void tcp_server_task(void *pvParameters) {
+    struct sockaddr_in server_addr, client_addr;
+    socklen_t client_len = sizeof(client_addr);
+
+    while (!wifi_ap_started) {
+        vTaskDelay(pdMS_TO_TICKS(1000));
+        ESP_LOGI("TCP", "Waiting for Access Point to start...");
+    }
+    
+    tcp_server_socket = socket(AF_INET, SOCK_STREAM, 0);
+    if (tcp_server_socket < 0) {
+        ESP_LOGE("TCP", "Failed to create socket");
+        vTaskDelete(NULL);
+        return;
+    }
+
+    int reuse = 1;
+    setsockopt(tcp_server_socket, SOL_SOCKET, SO_REUSEADDR, &reuse, sizeof(reuse));
+    
+    server_addr.sin_family = AF_INET;
+    server_addr.sin_port = htons(TCP_PORT);
+    server_addr.sin_addr.s_addr = INADDR_ANY;
+    
+    if (bind(tcp_server_socket, (struct sockaddr*)&server_addr, sizeof(server_addr)) < 0) {
+        ESP_LOGE("TCP", "Failed to bind socket");
+        close(tcp_server_socket);
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    if (listen(tcp_server_socket, 4) < 0) {
+        ESP_LOGE("TCP", "Failed to listen");
+        close(tcp_server_socket);
+        vTaskDelete(NULL);
+        return;
+    }
+    
+    ESP_LOGI("TCP", "TCP Server listening on 192.168.4.1:%d", TCP_PORT);
+    ESP_LOGI("TCP", "Ready to accept connections from Python client");
+    
+    while (1) {
+        client_socket = accept(tcp_server_socket, (struct sockaddr*)&client_addr, &client_len);
+        
+        if (client_socket >= 0) {
+            ESP_LOGI("TCP", "Python client connected");
+
+            const char* welcome = "ESP32 Turret Controller Ready!\n";
+            send(client_socket, welcome, strlen(welcome), 0);
+            
+            uint8_t buffer[128];
+            char line_buffer[32];
+            int line_pos = 0;
+            
+            while (1) {
+                int len = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                if (len <= 0) {
+                    ESP_LOGI("TCP", "Client disconnected");
+                    break;
+                }
+
+                for (int i = 0; i < len; i++) {
+                    char c = buffer[i];
+
+                    if (c == '\n' || c == '\r') {
+                        if (line_pos > 0) {
+                            line_buffer[line_pos] = '\0';
+                            ESP_LOGI("TCP", "Cmd: %s", line_buffer);
+                            process_input(line_buffer);
+                            
+                            char response[64];
+                            snprintf(response, sizeof(response), "OK: X=%.1f Y=%.1f\n", 
+                                    turret_pos.x_angle, turret_pos.y_angle);
+                            send(client_socket, response, strlen(response), 0);
+                            
+                            line_pos = 0; 
+                        }
+                    }
+
+                    else if (line_pos < sizeof(line_buffer) - 1) {
+                        line_buffer[line_pos++] = c;
+                    }
+                }
+            }
+            
+            close(client_socket);
+            client_socket = -1;
+        }
+        
+        vTaskDelay(pdMS_TO_TICKS(50)); 
+    }
+}
 void app_main(void) {
+    ESP_LOGI("MAIN", "Starting ESP32 Turret Controller in Access Point mode...");
+    
     gpio_reset_pin(TRIGGER_PIN);
 
     configure_pwm();
@@ -473,6 +636,19 @@ void app_main(void) {
     turret_pos.target_x = 0.0f;
     turret_pos.target_y = 0.0f;
 
-    xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL);
-    xTaskCreate(motor_control_task, "motor_control_task", 8192, NULL, 10, NULL);
+    // Ініціалізація WiFi Access Point
+    ESP_LOGI("MAIN", "Initializing WiFi Access Point...");
+    wifi_init_ap();
+
+    ESP_LOGI("MAIN", "Starting tasks...");
+
+    xTaskCreate(tcp_server_task, "tcp_server", 4096, NULL, 5, NULL);
+    xTaskCreate(motor_control_task, "motor_control", 8192, NULL, 10, NULL);
+    // xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL);
+    
+    ESP_LOGI("MAIN", "=== ESP32 Turret Controller Ready ===");
+    ESP_LOGI("MAIN", "1. Connect to WiFi: %s", WIFI_AP_SSID);
+    ESP_LOGI("MAIN", "2. Password: %s", WIFI_AP_PASS);
+    ESP_LOGI("MAIN", "3. Run Python script with IP: 192.168.4.1");
+    ESP_LOGI("MAIN", "4. Port: %d", TCP_PORT);
 }
