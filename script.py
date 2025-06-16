@@ -1,309 +1,307 @@
+#!/usr/bin/env python3
+"""
+ESP32 Turret Control System
+Supports both keyboard and gamepad input with optimized command transmission
+"""
+
 import socket
+import pygame
 from pynput import keyboard
 import threading
 import time
+import sys
 
-# Замість serial підключення - TCP
-ESP32_IP = "192.168.4.1"  # IP адреса вашого ESP32
+ESP32_IP = "192.168.4.1"
 ESP32_PORT = 8080
 
-# Створити TCP з'єднання
-sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-
-def connect_to_esp32():
-    """Підключення до ESP32"""
-    try:
-        sock.connect((ESP32_IP, ESP32_PORT))
-        print(f"Підключено до ESP32: {ESP32_IP}:{ESP32_PORT}")
-        return True
-    except Exception as e:
-        print(f"Помилка підключення: {e}")
-        return False
-
-# Решта коду залишається майже такий же!
-key_states = {
-    'up': '0',
-    'down': '0',
-    'left': '0',
-    'right': '0'
-}
-
-previous_state = ''
-lock = threading.Lock()
-running = True
-state_changed = threading.Event()
-
-def get_current_state():
-    return key_states['up'] + key_states['down'] + key_states['left'] + key_states['right']
-
-def send_single_char(char):
-    """Відправляє одиночний символ через WiFi"""
-    try:
-        message = str(char) + '\n'
-        sock.send(message.encode())  # Замість ser.write()
-        timestamp = time.strftime('%H:%M:%S')
-        display_char = "SPACE" if char == ' ' else char
-        print(f"[{timestamp}] Символ: {display_char}")
-    except Exception as e:
-        print(f"Помилка відправки: {e}")
-
-# on_press та on_release залишаються БЕЗ ЗМІН!
-def on_press(key):
-    try:
-        with lock:
-            changed = False
+class TurretController:
+    def __init__(self):
+        self.sock = None  # Just TCP socket like original
+        self.running = True
+        self.gamepad_mode = False
+        self.gamepad = None
+        self.esp32_connected = False
+        
+        # Keyboard state
+        self.key_states = {'up': False, 'down': False, 'left': False, 'right': False}
+        
+    def connect_to_esp32(self):
+        """Connect to ESP32 with optimized settings"""
+        try:
+            self.sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.sock.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
+            self.sock.connect((ESP32_IP, ESP32_PORT))
+            self.esp32_connected = True
+            print("ESP32 connected successfully")
+            return True
+        except Exception as e:
+            print(f"ESP32 connection failed: {e}")
+            print("Running in test mode")
+            self.esp32_connected = False
+            return False
+    
+    def init_gamepad(self):
+        """Initialize gamepad"""
+        try:
+            pygame.init()
+            pygame.joystick.init()
             
-            if key == keyboard.Key.up and key_states['up'] != 'A':
-                key_states['up'] = 'A'
-                changed = True
-            elif key == keyboard.Key.down and key_states['down'] != 'B':
-                key_states['down'] = 'B'
-                changed = True
-            elif key == keyboard.Key.left and key_states['left'] != 'D':
-                key_states['left'] = 'D'
-                changed = True
-            elif key == keyboard.Key.right and key_states['right'] != 'C':
-                key_states['right'] = 'C'
-                changed = True
-            elif key == keyboard.Key.space:
-                send_single_char(' ')
-                return
-            elif hasattr(key, 'char') and key.char and key.char.isprintable():
-                send_single_char(key.char)
-                return
+            count = pygame.joystick.get_count()
+            print(f"Gamepads found: {count}")
             
-            if changed:
-                state_changed.set()
+            if count == 0:
+                print("No gamepad available")
+                return False
                 
-    except AttributeError:
-        pass
-
-def on_release(key):
-    global running
-    try:
-        with lock:
-            changed = False
+            self.gamepad = pygame.joystick.Joystick(0)
+            self.gamepad.init()
             
-            if key == keyboard.Key.up and key_states['up'] != '0':
-                key_states['up'] = '0'
-                changed = True
-            elif key == keyboard.Key.down and key_states['down'] != '0':
-                key_states['down'] = '0'
-                changed = True
-            elif key == keyboard.Key.left and key_states['left'] != '0':
-                key_states['left'] = '0'
-                changed = True
-            elif key == keyboard.Key.right and key_states['right'] != '0':
-                key_states['right'] = '0'
-                changed = True
-            elif key == keyboard.Key.esc:
-                running = False
-                state_changed.set()
+            print(f"Gamepad: {self.gamepad.get_name()}")
+            print(f"Axes: {self.gamepad.get_numaxes()}, Buttons: {self.gamepad.get_numbuttons()}")
+            
+            return True
+            
+        except Exception as e:
+            print(f"Gamepad initialization error: {e}")
+            return False
+    
+    def send_to_esp32(self, command):
+        """Send command to ESP32 with minimal latency"""
+        try:
+            if self.esp32_connected and self.sock:
+                data = (command + '\n').encode()
+                self.sock.sendall(data)
+                print(f"-> ESP32: {command}")
+            else:
+                print(f"-> (test): {command}")
+        except Exception as e:
+            print(f"Transmission error: {e}")
+            self.esp32_connected = False
+    
+    def keyboard_mode(self):
+        """Keyboard control mode (matching original logic)"""
+        print("KEYBOARD MODE")
+        print("Arrow keys - movement, SPACE - shoot, TAB/G - gamepad, ESC - exit")
+        
+        last_state = ""
+        
+        while self.running and not self.gamepad_mode:
+            # Form 4-character state string like original: ABCD format
+            current_state = (
+                ('A' if self.key_states['up'] else '0') +
+                ('B' if self.key_states['down'] else '0') + 
+                ('D' if self.key_states['left'] else '0') +
+                ('C' if self.key_states['right'] else '0')
+            )
+            
+            # Send ONLY when state changes
+            if current_state != last_state:
+                self.send_to_esp32(current_state)
+                last_state = current_state
+            
+            time.sleep(0.03)  # Faster polling for better response
+    
+    def gamepad_mode_loop(self):
+        """Gamepad control mode (optimized for minimal latency)"""
+        print("GAMEPAD MODE")
+        print("Left stick - movement, button 0 - shoot, button 1 - return to keyboard")
+        
+        deadzone = 0.2
+        last_command = ""
+        last_send_time = 0
+        send_interval = 0.05  # Send max every 50ms (20 FPS)
+        
+        while self.running and self.gamepad_mode:
+            try:
+                # Process events (buttons only)
+                events = pygame.event.get()
+                for event in events:
+                    if event.type == pygame.JOYBUTTONDOWN:
+                        if event.button == 2:  # Shoot
+                            self.send_to_esp32(" ")
+                        elif event.button == 1:  # Return to keyboard
+                            print("Returning to keyboard mode")
+                            self.send_to_esp32("STOP")
+                            self.gamepad_mode = False
+                            return
+                
+                pygame.event.pump()
+                
+                # Read sticks (rate limited)
+                current_time = time.time()
+                if current_time - last_send_time >= send_interval:
+                    current_command = ""
+                    if self.gamepad:
+                        x = self.gamepad.get_axis(0)  # Left stick X
+                        y = self.gamepad.get_axis(1)  # Left stick Y
+                        
+                        # Form movement command
+                        commands = []
+                        
+                        # Horizontal movement
+                        if abs(x) > deadzone:
+                            if x < 0:
+                                speed = max(1, min(255, int(abs(x) * 255)))
+                                commands.append(f"R{speed:03d}")
+                            else:
+                                speed = max(1, min(255, int(x * 255)))
+                                commands.append(f"L{speed:03d}")
+                        
+                        # Vertical movement
+                        if abs(y) > deadzone:
+                            if y < 0:
+                                speed = max(1, min(255, int(abs(y) * 255)))
+                                commands.append(f"D{speed:03d}")
+                            else:
+                                speed = max(1, min(255, int(y * 255)))
+                                commands.append(f"U{speed:03d}")
+                        
+                        # Form command
+                        if commands:
+                            current_command = ",".join(commands)
+                        else:
+                            current_command = "STOP"
+                    
+                    # Send ONLY when command changes (no periodic resends!)
+                    if current_command != last_command:
+                        self.send_to_esp32(current_command)
+                        last_command = current_command
+                        last_send_time = current_time
+                
+                time.sleep(0.01)  # Fast polling but rate-limited sending
+                
+            except Exception as e:
+                print(f"Gamepad error: {e}")
+                self.gamepad_mode = False
+                break
+    
+    def on_press(self, key):
+        """Handle key press events"""
+        try:
+            if key == keyboard.Key.esc:
+                print("Shutting down")
+                self.running = False
                 return False
             
-            if changed:
-                state_changed.set()
-                
-    except AttributeError:
-        pass
-
-def send_data():
-    global previous_state
-    while running:
-        state_changed.wait()
-        state_changed.clear()
+            # Mode switching
+            if key == keyboard.Key.tab or (hasattr(key, 'char') and key.char == 'g'):
+                if self.gamepad and not self.gamepad_mode:
+                    print("Switching to gamepad mode")
+                    self.gamepad_mode = True
+                else:
+                    print("Gamepad unavailable or already active")
+                return
+            
+            # Only in keyboard mode
+            if not self.gamepad_mode:
+                if key == keyboard.Key.up:
+                    self.key_states['up'] = True
+                elif key == keyboard.Key.down:
+                    self.key_states['down'] = True
+                elif key == keyboard.Key.left:
+                    self.key_states['left'] = True
+                elif key == keyboard.Key.right:
+                    self.key_states['right'] = True
+                elif key == keyboard.Key.space:
+                    self.send_to_esp32(" ")
+                elif hasattr(key, 'char') and key.char and key.char.isprintable():
+                    self.send_to_esp32(key.char)
+                    
+        except AttributeError:
+            pass
+    
+    def on_release(self, key):
+        """Handle key release events"""
+        try:
+            if not self.gamepad_mode:
+                if key == keyboard.Key.up:
+                    self.key_states['up'] = False
+                elif key == keyboard.Key.down:
+                    self.key_states['down'] = False
+                elif key == keyboard.Key.left:
+                    self.key_states['left'] = False
+                elif key == keyboard.Key.right:
+                    self.key_states['right'] = False
+                    
+        except AttributeError:
+            pass
+    
+    def run(self):
+        """Main program loop"""
+        print("TURRET CONTROL SYSTEM")
+        print("=" * 40)
         
-        if not running:
-            break
-            
-        with lock:
-            current_state = get_current_state()
-            
-            if current_state != previous_state:
-                try:
-                    message = current_state + '\n'
-                    sock.send(message.encode())  # Замість ser.write()
-                    
-                    # Візуалізація залишається така сама
-                    display = message.strip().replace('0', '_')
-                    arrows = []
-                    if key_states['up'] == 'A': arrows.append('↑')
-                    if key_states['down'] == 'B': arrows.append('↓')
-                    if key_states['left'] == 'D': arrows.append('←')
-                    if key_states['right'] == 'C': arrows.append('→')
-                    
-                    arrow_display = ' '.join(arrows) if arrows else 'нічого'
-                    timestamp = time.strftime('%H:%M:%S')
-                    print(f"[{timestamp}] Зміна стану: [{display}] - {arrow_display}")
-                    
-                    previous_state = current_state
-                except Exception as e:
-                    print(f"Помилка відправки: {e}")
-
-# Запуск
-if connect_to_esp32():
-    sender_thread = threading.Thread(target=send_data, daemon=True)
-    sender_thread.start()
-    
-    print("Керування через WiFi:")
-    print("- Стрілки для руху")
-    print("- Всі символи та ПРОБІЛ для команд")
-    print("- ESC для виходу\n")
-    
-    with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-        listener.join()
-    
-    sock.close()
-    print("\nWiFi з'єднання закрито.")
-else:
-    print("Не вдалося підключитися до ESP32")
-
-# import serial
-# from pynput import keyboard
-# import threading
-# import time
-
-# # Налаштування порту (змініть на ваш)
-# ser = serial.Serial('/dev/ttyUSB0', 115200)
-
-# # Словник для зберігання стану кожної клавіші
-# key_states = {
-#     'up': '0',
-#     'down': '0',
-#     'left': '0',
-#     'right': '0'
-# }
-
-# # Змінна для збереження попереднього стану
-# previous_state = ''
-# lock = threading.Lock()
-# running = True
-# state_changed = threading.Event()
-
-# def get_current_state():
-#     """Повертає поточний стан всіх клавіш як рядок"""
-#     return key_states['up'] + key_states['down'] + key_states['left'] + key_states['right']
-
-# def send_single_char(char):
-#     """Відправляє одиночний символ негайно"""
-#     message = str(char) + '\n'
-#     ser.write(message.encode())
-#     timestamp = time.strftime('%H:%M:%S')
-    
-#     # Спеціальне відображення для пробілу
-#     display_char = "SPACE" if char == ' ' else char
-#     print(f"[{timestamp}] Символ: {display_char}")
-
-# def on_press(key):
-#     try:
-#         with lock:
-#             changed = False
-            
-#             # Обробка стрілок
-#             if key == keyboard.Key.up and key_states['up'] != 'A':
-#                 key_states['up'] = 'A'
-#                 changed = True
-#             elif key == keyboard.Key.down and key_states['down'] != 'B':
-#                 key_states['down'] = 'B'
-#                 changed = True
-#             elif key == keyboard.Key.left and key_states['left'] != 'D':
-#                 key_states['left'] = 'D'
-#                 changed = True
-#             elif key == keyboard.Key.right and key_states['right'] != 'C':
-#                 key_states['right'] = 'C'
-#                 changed = True
-            
-#             # Обробка пробілу як спеціальної клавіші
-#             elif key == keyboard.Key.space:
-#                 send_single_char(' ')
-#                 return  # Не встановлюємо state_changed для символів
-            
-#             # Обробка всіх символів (літери, цифри, знаки пунктуації)
-#             elif hasattr(key, 'char') and key.char and key.char.isprintable():
-#                 send_single_char(key.char)
-#                 return  # Не встановлюємо state_changed для символів
-            
-#             if changed:
-#                 state_changed.set()
-                
-#     except AttributeError:
-#         pass
-
-# def on_release(key):
-#     global running
-#     try:
-#         with lock:
-#             changed = False
-            
-#             if key == keyboard.Key.up and key_states['up'] != '0':
-#                 key_states['up'] = '0'
-#                 changed = True
-#             elif key == keyboard.Key.down and key_states['down'] != '0':
-#                 key_states['down'] = '0'
-#                 changed = True
-#             elif key == keyboard.Key.left and key_states['left'] != '0':
-#                 key_states['left'] = '0'
-#                 changed = True
-#             elif key == keyboard.Key.right and key_states['right'] != '0':
-#                 key_states['right'] = '0'
-#                 changed = True
-#             elif key == keyboard.Key.esc:
-#                 running = False
-#                 state_changed.set()
-#                 return False
-            
-#             if changed:
-#                 state_changed.set()
-                
-#     except AttributeError:
-#         pass
-
-# def send_data():
-#     global previous_state
-#     while running:
-#         # Чекаємо на зміну стану
-#         state_changed.wait()
-#         state_changed.clear()
+        # Connection
+        self.connect_to_esp32()
+        gamepad_available = self.init_gamepad()
         
-#         if not running:
-#             break
-            
-#         with lock:
-#             current_state = get_current_state()
-            
-#             # Відправляємо тільки якщо стан змінився
-#             if current_state != previous_state:
-#                 message = current_state + '\n'
-#                 ser.write(message.encode())
-                
-#                 # Візуалізація
-#                 display = message.strip().replace('0', '_')
-#                 arrows = []
-#                 if key_states['up'] == 'A': arrows.append('↑')
-#                 if key_states['down'] == 'B': arrows.append('↓')
-#                 if key_states['left'] == 'D': arrows.append('←')
-#                 if key_states['right'] == 'C': arrows.append('→')
-                
-#                 arrow_display = ' '.join(arrows) if arrows else 'нічого'
-#                 timestamp = time.strftime('%H:%M:%S')
-#                 print(f"[{timestamp}] Зміна стану: [{display}] - {arrow_display}")
-                
-#                 previous_state = current_state
+        print("\nCONTROLS:")
+        print("Keyboard: Arrow keys - movement, SPACE - shoot")
+        if gamepad_available:
+            print("Gamepad: TAB/G - switch to gamepad")
+            print("Gamepad: sticks - movement, button 0 - shoot, button 1 - back")
+        print("ESC - exit")
+        print("=" * 40)
+        
+        # Start keyboard mode thread
+        keyboard_thread = threading.Thread(target=self.keyboard_mode, daemon=True)
+        keyboard_thread.start()
+        
+        # Keyboard listener in main thread
+        try:
+            with keyboard.Listener(on_press=self.on_press, on_release=self.on_release) as listener:
+                while self.running:
+                    if self.gamepad_mode and gamepad_available:
+                        self.gamepad_mode_loop()
+                    time.sleep(0.1)
+                    
+        except KeyboardInterrupt:
+            print("\nInterrupted")
+        
+        # Cleanup
+        self.running = False
+        print("Shutting down...")
+        
+        # Send final STOP
+        if self.esp32_connected:
+            try:
+                self.send_to_esp32("STOP")
+                time.sleep(0.1)
+            except:
+                pass
+        
+        # Close connection
+        if self.sock:
+            try:
+                self.sock.shutdown(socket.SHUT_RDWR)
+                self.sock.close()
+            except:
+                pass
+        
+        # Cleanup pygame
+        if self.gamepad:
+            try:
+                pygame.quit()
+            except:
+                pass
+        
+        print("Program terminated")
 
-# # Запуск потоку для відправки даних
-# sender_thread = threading.Thread(target=send_data, daemon=True)
-# sender_thread.start()
+def main():
+    """Main function"""
+    print("Starting turret control system...")
+    
+    # Check dependencies
+    try:
+        import pygame
+        import pynput
+    except ImportError as e:
+        print(f"Missing dependency: {e}")
+        print("Install with: pip install pygame pynput")
+        sys.exit(1)
+    
+    controller = TurretController()
+    controller.run()
 
-# print("Керування:")
-# print("- Стрілки для руху (відправляються при зміні стану)")
-# print("- ВСІ символи (літери, цифри, знаки) та ПРОБІЛ для команд (відправляються негайно)")
-# print("- ESC для виходу")
-# print("Формат стрілок: [UP, DOWN, LEFT, RIGHT]")
-# print("Дані відправляються тільки при зміни стану\n")
-
-# # Запуск слухача клавіатури
-# with keyboard.Listener(on_press=on_press, on_release=on_release) as listener:
-#     listener.join()
-
-# ser.close()
-# print("\nЗ'єднання закрито.")
+if __name__ == "__main__":
+    main()

@@ -96,6 +96,20 @@ typedef struct {
     _Atomic bool up_pressed;
 } controls_t;
 
+typedef struct {
+    uint16_t x_speed;      
+    uint16_t y_speed;      
+    bool x_direction;      
+    bool y_direction;      
+    bool x_active;         
+    bool y_active;         
+} analog_motor_state_t;
+
+typedef enum {
+    INPUT_MODE_DIGITAL,  
+    INPUT_MODE_ANALOG     
+} input_mode_t;
+
 controls_t controls = {
     .left_pressed   = false,
     .right_pressed  = false,

@@ -2,6 +2,8 @@
 #include "as5600.h"
 
 turret_position_t turret_pos = {0};
+analog_motor_state_t analog_state = {0};
+
 as5600_handle_t x_encoder = NULL;
 as5600_handle_t y_encoder = NULL;
 
@@ -20,6 +22,7 @@ static int client_socket = -1;
 
 static volatile bool shoot_requested = false;
 static volatile bool pass_encoder = false;
+static bool analog_mode_active = false;
 
 static void IRAM_ATTR trigger_interrupt(void *arg) {
     uint32_t current_time = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
@@ -35,6 +38,33 @@ static void IRAM_ATTR trigger_interrupt(void *arg) {
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
     vTaskNotifyGiveFromISR(motor_control_task_handle, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+}
+
+static bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data) {
+    gpio_set_level(TRIGGER_PIN, 0);
+    gptimer_stop(timer);
+
+    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
+    vTaskNotifyGiveFromISR(motor_control_task_handle, &xHigherPriorityTaskWoken);
+    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
+
+    return false; 
+}
+
+void init_shot_timer() {
+    gptimer_config_t timer_config = {
+        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
+        .direction = GPTIMER_COUNT_UP,
+        .resolution_hz = 1000000, 
+    };
+    gptimer_new_timer(&timer_config, &shot_timer);
+
+    gptimer_event_callbacks_t cbs = {
+        .on_alarm = timer_callback,
+    };
+    gptimer_register_event_callbacks(shot_timer, &cbs, NULL);
+    
+    gptimer_enable(shot_timer);
 }
 
 static void wifi_ap_event_handler(void* arg, esp_event_base_t event_base, int32_t event_id, void* event_data) {
@@ -107,6 +137,7 @@ esp_err_t wifi_init_ap(void) {
     ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_AP));
     ESP_ERROR_CHECK(esp_wifi_set_config(WIFI_IF_AP, &wifi_config));
     ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_ps(WIFI_PS_NONE); 
 
     ESP_LOGI("WiFi-AP", "WiFi Access Point initialized");
     ESP_LOGI("WiFi-AP", "SSID: %s", WIFI_AP_SSID);
@@ -179,15 +210,6 @@ esp_err_t init_dual_encoders(void) {
     as5600_print_diagnostics(y_encoder);
     
     return ESP_OK;
-}
-
-esp_err_t read_x_encoder(float *angle) {
-    if (x_encoder == NULL) {
-        ESP_LOGE("encoder", "X encoder not initialized");
-        return ESP_FAIL;
-    }
-    
-    return as5600_read_angle_degrees_sliding(x_encoder, angle, 5);
 }
 
 esp_err_t read_y_encoder(float *angle) {
@@ -301,6 +323,7 @@ void configure_trigger() {
             .mode = GPIO_MODE_INPUT,
             .intr_type = GPIO_INTR_POSEDGE,
             .pull_down_en = GPIO_PULLDOWN_ENABLE,
+            // .pull_up_en = GPIO_PULLUP_ENABLE,
             .pin_bit_mask = 1ULL << INPUT_TRIGGER_PIN
         }
     };
@@ -309,8 +332,8 @@ void configure_trigger() {
         gpio_config(&gpio_conf[i]);
     }
 
-    // gpio_install_isr_service(0);
-    // gpio_isr_handler_add(INPUT_TRIGGER_PIN, trigger_interrupt, NULL);
+    gpio_install_isr_service(0);
+    gpio_isr_handler_add(INPUT_TRIGGER_PIN, trigger_interrupt, NULL);
 }
 
 void stop_motor(motor_t *motor) {
@@ -357,6 +380,126 @@ void restore_motor_states(void) {
     }
 }
 
+uint16_t speed_to_duty(uint8_t speed) {
+    if (speed == 0) return 0;
+
+    float normalized = (float)speed / 255.0f;
+    uint16_t duty_range = MAX_PWM_DUTY - MIN_PWM_DUTY;
+    uint16_t duty = MIN_PWM_DUTY + (uint16_t)(normalized * duty_range);
+    
+    if (duty >= MAX_PWM_DUTY) duty = MAX_PWM_DUTY;
+    ESP_LOGI("ANALOG DUTY", "%d", duty);
+    return duty;
+}
+
+void parse_analog_command(const char *input) {
+    controls.up_pressed = false;
+    controls.down_pressed = false;
+    controls.left_pressed = false; 
+    controls.right_pressed = false;
+
+    memset(&analog_state, 0, sizeof(analog_state));
+    
+    if (strcmp(input, "STOP") == 0) {
+        return;
+    }
+
+    const char *ptr = input;
+    while (*ptr) {
+        if (*ptr == 'L' || *ptr == 'R' || *ptr == 'U' || *ptr == 'D') {
+            char dir = *ptr++;
+
+            int speed = 0;
+            while (*ptr >= '0' && *ptr <= '9') {
+                speed = speed * 10 + (*ptr - '0');
+                ptr++;
+            }
+
+            ESP_LOGI("parse analog", "%d", speed);
+
+            switch (dir) {
+                case 'L':
+                    analog_state.x_active = true;
+                    analog_state.x_speed = speed;
+                    analog_state.x_direction = false;
+                    break;
+                case 'R':
+                    analog_state.x_active = true;
+                    analog_state.x_speed = speed;
+                    analog_state.x_direction = true;
+                    break;
+                case 'U':
+                    analog_state.y_active = true;
+                    analog_state.y_speed = speed;
+                    analog_state.y_direction = true;
+                    break;
+                case 'D':
+                    analog_state.y_active = true;
+                    analog_state.y_speed = speed;
+                    analog_state.y_direction = false;
+                    break;
+            }
+        } else {
+            ptr++;
+        }
+    }
+}
+
+void set_motor_speed_analog(motor_t *motor, uint16_t speed, bool forward) {
+    uint16_t duty = speed_to_duty(speed);
+    
+    static uint16_t last_x_speed = 0;
+    static uint16_t last_y_speed = 0;
+    
+    if (motor == &motor_x) {
+        motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
+                                     (forward ? MOTOR_BACKWARD : MOTOR_FORWARD);
+        
+        if (x_state == desired_state && speed > 0 && last_x_speed == speed) {
+            // ESP_LOGI("ANALOG", "X motor already at speed %d, skipping", speed);
+            return; 
+        }
+        // ESP_LOGI("ANALOG", "X motor: state %d->%d, speed %d->%d", 
+        //          x_state, desired_state, last_x_speed, speed);
+        x_state = desired_state;
+        last_x_speed = speed;
+        
+    } else if (motor == &motor_y) {
+        motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
+                                     (forward ? MOTOR_FORWARD : MOTOR_BACKWARD);
+
+        if (y_state == desired_state && speed > 0 && last_y_speed == speed) {
+            // ESP_LOGI("ANALOG", "Y motor already at speed %d, skipping", speed);
+            return;
+        }
+        // ESP_LOGI("ANALOG", "Y motor: state %d->%d, speed %d->%d", 
+        //          y_state, desired_state, last_y_speed, speed);
+        y_state = desired_state;
+        last_y_speed = speed;
+    }
+
+    
+    if (speed == 0) {
+        ledc_set_duty(LEDC_MODE, motor->in1_channel, 0);
+        ledc_set_duty(LEDC_MODE, motor->in2_channel, 0);
+        ledc_update_duty(LEDC_MODE, motor->in1_channel);
+        ledc_update_duty(LEDC_MODE, motor->in2_channel);
+        return; 
+    }
+
+    if (forward) {
+        ledc_set_duty(LEDC_MODE, motor->in1_channel, duty);
+        ledc_update_duty(LEDC_MODE, motor->in1_channel);
+        // ledc_set_fade_with_time(LEDC_MODE, motor->in1_channel, duty, ACCEL_TIME_MS);
+        // ledc_fade_start(LEDC_MODE, motor->in1_channel, LEDC_FADE_NO_WAIT);
+    } else {
+        ledc_set_duty(LEDC_MODE, motor->in2_channel, duty);
+        ledc_update_duty(LEDC_MODE, motor->in2_channel);
+        // ledc_set_fade_with_time(LEDC_MODE, motor->in2_channel, duty, ACCEL_TIME_MS);
+        // ledc_fade_start(LEDC_MODE, motor->in2_channel, LEDC_FADE_NO_WAIT);
+    }
+}
+
 void shoot() {
     bool motors_were_running = (x_state == MOTOR_FORWARD || x_state == MOTOR_BACKWARD ||
                                y_state == MOTOR_FORWARD || y_state == MOTOR_BACKWARD);
@@ -381,33 +524,6 @@ void shoot() {
     gptimer_start(shot_timer);
 }
 
-static bool IRAM_ATTR timer_callback(gptimer_handle_t timer, const gptimer_alarm_event_data_t *edata, void *user_data) {
-    gpio_set_level(TRIGGER_PIN, 0);
-    gptimer_stop(timer);
-
-    BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    vTaskNotifyGiveFromISR(motor_control_task_handle, &xHigherPriorityTaskWoken);
-    portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
-
-    return false; 
-}
-
-void init_shot_timer() {
-    gptimer_config_t timer_config = {
-        .clk_src = GPTIMER_CLK_SRC_DEFAULT,
-        .direction = GPTIMER_COUNT_UP,
-        .resolution_hz = 1000000, 
-    };
-    gptimer_new_timer(&timer_config, &shot_timer);
-
-    gptimer_event_callbacks_t cbs = {
-        .on_alarm = timer_callback,
-    };
-    gptimer_register_event_callbacks(shot_timer, &cbs, NULL);
-    
-    gptimer_enable(shot_timer);
-}
-
 void motor_control_task(void *pvParameters) {
     if (init_dual_encoders() != ESP_OK) {
         ESP_LOGE("motor", "Failed to initialize encoders");
@@ -415,8 +531,8 @@ void motor_control_task(void *pvParameters) {
         return;
     }
 
-    turret_pos.x_angle = 0.0f;
     turret_pos.y_angle = 0.0f;
+    float y_raw_angle;
 
     while (1) {
         if (shoot_requested) {
@@ -431,100 +547,96 @@ void motor_control_task(void *pvParameters) {
             restore_motor_states();
         }
 
-        bool up = atomic_load_explicit(&controls.up_pressed, memory_order_acquire);
-        bool down = atomic_load_explicit(&controls.down_pressed, memory_order_acquire);
-        bool left = atomic_load_explicit(&controls.left_pressed, memory_order_acquire);
-        bool right = atomic_load_explicit(&controls.right_pressed, memory_order_acquire);
-        
-        float x_raw_angle, y_raw_angle;
-        
-        // if (as5600_read_angle_degrees_sliding(x_encoder, &x_raw_angle, 20) == ESP_OK) {
-        //     turret_pos.x_angle = x_raw_angle;
-        // }
-        
         if (as5600_read_angle_degrees_sliding(y_encoder, &y_raw_angle, 20) == ESP_OK) {
-            turret_pos.y_angle = y_raw_angle;
+                turret_pos.y_angle = y_raw_angle;
         }
         ESP_LOGD("encoder", "POS: %f", turret_pos.y_angle);
+        // ESP_LOGI("duty check", "Y: %d %d | X: %d %d", (int)ledc_get_duty(LEDC_MODE, motor_y.in1_channel), (int)ledc_get_duty(LEDC_MODE, motor_y.in2_channel), 
+        //                                                 (int)ledc_get_duty(LEDC_MODE, motor_x.in1_channel), 
+        //                                                 (int)ledc_get_duty(LEDC_MODE, motor_x.in2_channel));
 
-        // === Y AXIS ===
-        if (up && !down) {
-            if (turret_pos.y_angle <= MIN_Y_ANGLE && !pass_encoder) {
-                stop_motor(&motor_y);
-                
-                y_state = MOTOR_STOPPED;
-
-                ESP_LOGW("motor", "Y DOWN blocked - limit: %.2f°", turret_pos.y_angle);
-            } else {
-                if (y_state != MOTOR_FORWARD) {
-                ESP_LOGI("motor", "Y UP: %.2f°", turret_pos.y_angle);
-
-                ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, 0);
-                ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, 0);
-
-                ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
-                ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
-
-                ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-                ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-
-                y_state = MOTOR_FORWARD;
-            }
-            }
+        if (!analog_mode_active) {
+            bool up = atomic_load_explicit(&controls.up_pressed, memory_order_acquire);
+            bool down = atomic_load_explicit(&controls.down_pressed, memory_order_acquire);
+            bool left = atomic_load_explicit(&controls.left_pressed, memory_order_acquire);
+            bool right = atomic_load_explicit(&controls.right_pressed, memory_order_acquire);
             
-        } else if (down && !up) {
-            if (turret_pos.y_angle >= MAX_Y_ANGLE && !pass_encoder) {
-                if (y_state == MOTOR_BACKWARD) {
+            
+            // === Y AXIS ===
+            if (up && !down) {
+                if (turret_pos.y_angle <= MIN_Y_ANGLE && !pass_encoder) {
                     stop_motor(&motor_y);
                     
                     y_state = MOTOR_STOPPED;
 
                     ESP_LOGW("motor", "Y DOWN blocked - limit: %.2f°", turret_pos.y_angle);
+                } else {
+                    if (y_state != MOTOR_FORWARD) {
+                    ESP_LOGI("motor", "Y UP: %.2f°", turret_pos.y_angle);
+
+                    stop_motor(&motor_y);
+
+                    ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+                    ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
+                    y_state = MOTOR_FORWARD;
                 }
-            } else if (y_state != MOTOR_BACKWARD) {
-                ESP_LOGI("motor", "Y DOWN: %.2f°", turret_pos.y_angle);
-                stop_motor(&motor_y);
-            
-                ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-                ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-                y_state = MOTOR_BACKWARD;
-            }
-        } else {
-            if (y_state == MOTOR_FORWARD || y_state == MOTOR_BACKWARD) {
-                stop_motor(&motor_y);
-
-                y_state = MOTOR_BRAKING;
-            }
-        }
-        
-        // === X AXIS ===
-        if (left && !right) {
-            if (x_state != MOTOR_FORWARD) {
-                ESP_LOGI("motor", "X LEFT: %.2f°", turret_pos.x_angle);
-
-                stop_motor(&motor_x);
-
-                ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-                ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+                }
                 
-                x_state = MOTOR_FORWARD;
+            } else if (down && !up) {
+                if (turret_pos.y_angle >= MAX_Y_ANGLE && !pass_encoder) {
+                    if (y_state == MOTOR_BACKWARD) {
+                        stop_motor(&motor_y);
+                        
+                        y_state = MOTOR_STOPPED;
+
+                        ESP_LOGW("motor", "Y DOWN blocked - limit: %.2f°", turret_pos.y_angle);
+                    }
+                } else if (y_state != MOTOR_BACKWARD) {
+                    ESP_LOGI("motor", "Y DOWN: %.2f°", turret_pos.y_angle);
+                    stop_motor(&motor_y);
+                
+                    ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+                    ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+                    y_state = MOTOR_BACKWARD;
+                }
+            } else {
+                if (y_state == MOTOR_FORWARD || y_state == MOTOR_BACKWARD) {
+                    stop_motor(&motor_y);
+
+                    y_state = MOTOR_BRAKING;
+                }
             }
-        } else if (right && !left) {
-            if (x_state != MOTOR_BACKWARD) {
-                ESP_LOGI("motor", "X RIGHT: %.2f°", turret_pos.x_angle);
+            
+            // === X AXIS ===
+            if (left && !right) {
+                if (x_state != MOTOR_FORWARD) {
+                    ESP_LOGI("motor", "X LEFT: %.2f°", turret_pos.x_angle);
 
-                stop_motor(&motor_x);
+                    stop_motor(&motor_x);
 
-                ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-                ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+                    ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+                    ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+                    
+                    x_state = MOTOR_FORWARD;
+                }
+            } else if (right && !left) {
+                if (x_state != MOTOR_BACKWARD) {
+                    ESP_LOGI("motor", "X RIGHT: %.2f°", turret_pos.x_angle);
 
-                x_state = MOTOR_BACKWARD;
-            }
-        } else {
-            if (x_state == MOTOR_FORWARD || x_state == MOTOR_BACKWARD) {
-                stop_motor(&motor_x);
+                    stop_motor(&motor_x);
 
-                x_state = MOTOR_BRAKING;
+                    ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+                    ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
+                    x_state = MOTOR_BACKWARD;
+                }
+            } else {
+                if (x_state == MOTOR_FORWARD || x_state == MOTOR_BACKWARD) {
+                    stop_motor(&motor_x);
+
+                    x_state = MOTOR_BRAKING;
+                }
             }
         }
         
@@ -533,118 +645,171 @@ void motor_control_task(void *pvParameters) {
 } 
 
 void process_input(char *input) {
+    TickType_t start_time = xTaskGetTickCount();
+
+    static char parsed_input[64];
+
     uint16_t len = strcspn(input, "\r\n");
-    char *parsed_input = (char *)malloc(len + 1);
+    if (len >= sizeof(parsed_input)) len = sizeof(parsed_input) - 1;
     
     memcpy(parsed_input, input, len);
     parsed_input[len] = '\0';
 
-    char *ptr = parsed_input;
+    bool is_analog = false;
+    if (len == 4 && strcmp(parsed_input, "STOP") == 0) {
+        is_analog = true;
+    } else if (len > 0 && (parsed_input[0] == 'L' || parsed_input[0] == 'R' || 
+                          parsed_input[0] == 'U' || parsed_input[0] == 'D')) {
+        is_analog = true;
+    }
     
-    if (*ptr == 'A') {
-        controls.up_pressed = true;
-    } else if (*ptr == 0x30) {
-        controls.up_pressed = false;
-    }
+    if (is_analog) {
+        analog_mode_active = true;
+        parse_analog_command(parsed_input);
 
-    if (*(ptr + 1) == 'B') {
-        controls.down_pressed = true;
-    } else if (*(ptr + 1) == 0x30){
-        controls.down_pressed = false;
-    }
+        if (analog_state.x_active) {
+            set_motor_speed_analog(&motor_x, analog_state.x_speed, analog_state.x_direction);
+            x_state = analog_state.x_direction ? MOTOR_FORWARD : MOTOR_BACKWARD;
+        } else if (x_state != MOTOR_STOPPED) { 
+            set_motor_speed_analog(&motor_x, 0, true);
+            x_state = MOTOR_STOPPED;
+        }
+        
+        if (analog_state.y_active) {
+            bool can_move = true;
+            if (!pass_encoder) {
+                if (!analog_state.y_direction && turret_pos.y_angle >= MAX_Y_ANGLE) {
+                    can_move = false;
+                } else if (analog_state.y_direction && turret_pos.y_angle <= MIN_Y_ANGLE) {
+                    can_move = false;
+                }
+            }
+            
+            if (can_move) {
+                set_motor_speed_analog(&motor_y, analog_state.y_speed, analog_state.y_direction);
+                y_state = analog_state.y_direction ? MOTOR_FORWARD : MOTOR_BACKWARD;
+            } else if (y_state != MOTOR_STOPPED) {  
+                set_motor_speed_analog(&motor_y, 0, true);
+                y_state = MOTOR_STOPPED;
+            }
+        } else if (y_state != MOTOR_STOPPED) { 
+            set_motor_speed_analog(&motor_y, 0, true);
+            y_state = MOTOR_STOPPED;
+        }
+    } else {
+        analog_mode_active = false; 
+        char *ptr = parsed_input;
+    
+        if (*ptr == 'A') {
+            controls.up_pressed = true;
+        } else if (*ptr == 0x30) {
+            controls.up_pressed = false;
+        }
 
-    if (*(ptr + 2) == 'D') {
-        controls.left_pressed = true;
-    } else if (*(ptr + 2) == 0x30){
-        controls.left_pressed = false;
-    }
+        if (*(ptr + 1) == 'B') {
+            controls.down_pressed = true;
+        } else if (*(ptr + 1) == 0x30){
+            controls.down_pressed = false;
+        }
 
-    if (*(ptr + 3) == 'C') {
-        controls.right_pressed = true;
-    } else if (*(ptr + 3) == 0x30) {
-        controls.right_pressed = false;
-    }
+        if (*(ptr + 2) == 'D') {
+            controls.left_pressed = true;
+        } else if (*(ptr + 2) == 0x30){
+            controls.left_pressed = false;
+        }
 
-    if (*ptr == 0x39 ) {
-        DUTY = MAX_PWM_DUTY;
-        ESP_LOGI("pars", "Duty set to MAX DUTY: %d", DUTY);
-    }
+        if (*(ptr + 3) == 'C') {
+            controls.right_pressed = true;
+        } else if (*(ptr + 3) == 0x30) {
+            controls.right_pressed = false;
+        }
 
-    if (*ptr == 0x31) {
-        DUTY = MIN_PWM_DUTY;
-        ESP_LOGI("pars", "Duty set to MIN DUTY: %d", DUTY);
-    }
-
-    if (*ptr == '+') {
-        uint16_t temp_duty = DUTY + DUTY_STEP;
-
-        if (temp_duty > MAX_PWM_DUTY) {
+        if (*ptr == 0x39 ) {
             DUTY = MAX_PWM_DUTY;
-        } else {
-            DUTY = temp_duty;
+            ESP_LOGI("pars", "Duty set to MAX DUTY: %d", DUTY);
         }
 
-        ESP_LOGI("duty", "Duty set to: %d", (int)DUTY);
-    }
-    if (*ptr == '-') {
-        uint16_t temp_duty = DUTY - DUTY_STEP;
-
-        if (temp_duty < MIN_PWM_DUTY) {
+        if (*ptr == 0x31) {
             DUTY = MIN_PWM_DUTY;
-        } else {
-            DUTY = temp_duty;
+            ESP_LOGI("pars", "Duty set to MIN DUTY: %d", DUTY);
         }
 
-        ESP_LOGI("duty", "Duty set to: %d", (int)DUTY);
-    }
+        if (*ptr == '+') {
+            uint16_t temp_duty = DUTY + DUTY_STEP;
 
-    if (*ptr == 'n') {
-        uint16_t temp_shoot_time = shoot_time - 10;
+            if (temp_duty > MAX_PWM_DUTY) {
+                DUTY = MAX_PWM_DUTY;
+            } else {
+                DUTY = temp_duty;
+            }
 
-        if (temp_shoot_time <= MIN_SHOOT_TIME) {
-            shoot_time = MIN_SHOOT_TIME;
-        } else {
-            shoot_time = temp_shoot_time;
+            ESP_LOGI("duty", "Duty set to: %d", (int)DUTY);
+        }
+        if (*ptr == '-') {
+            uint16_t temp_duty = DUTY - DUTY_STEP;
+
+            if (temp_duty < MIN_PWM_DUTY) {
+                DUTY = MIN_PWM_DUTY;
+            } else {
+                DUTY = temp_duty;
+            }
+
+            ESP_LOGI("duty", "Duty set to: %d", (int)DUTY);
         }
 
-        ESP_LOGI("shoot time", "Time set to: %d", (int)shoot_time);
-    }
-    if (*ptr == 'm') {
-        uint16_t temp_shoot_time = shoot_time + 10;
+        if (*ptr == 'n') {
+            uint16_t temp_shoot_time = shoot_time - 10;
 
-        if (temp_shoot_time >= MAX_SHOOT_TIME) {
-            shoot_time = MAX_SHOOT_TIME;
-        } else {
-            shoot_time = temp_shoot_time;
+            if (temp_shoot_time <= MIN_SHOOT_TIME) {
+                shoot_time = MIN_SHOOT_TIME;
+            } else {
+                shoot_time = temp_shoot_time;
+            }
+
+            ESP_LOGI("shoot time", "Time set to: %d", (int)shoot_time);
+        }
+        if (*ptr == 'm') {
+            uint16_t temp_shoot_time = shoot_time + 10;
+
+            if (temp_shoot_time >= MAX_SHOOT_TIME) {
+                shoot_time = MAX_SHOOT_TIME;
+            } else {
+                shoot_time = temp_shoot_time;
+            }
+
+            ESP_LOGI("shoot time", "Time set to: %d", (int)shoot_time);
         }
 
-        ESP_LOGI("shoot time", "Time set to: %d", (int)shoot_time);
-    }
+        if (*ptr == 'p') {
+            pass_encoder = !pass_encoder;
 
-    if (*ptr == 'p') {
-        pass_encoder = !pass_encoder;
+            ESP_LOGI("cmd process", "Flip pass encoder var %d", pass_encoder);
+        }
+        
 
-        ESP_LOGI("cmd process", "Flip pass encoder var %d", pass_encoder);
-    }
+        if (*ptr == 0x20) {
+            ESP_LOGI("process input", "Shoot fired!");
+            shoot();
+        }
+        
+        if (*ptr == 'Z') {
+            ESP_LOGI("input", "Calibrating both axes...");
+            if (calibrate_turret() == ESP_OK) {
+                ESP_LOGI("input", "Dual calibration successful");
+            } else {
+                ESP_LOGI("input", "Calibration failed");
+            }
+        }
     
-
-    if (*ptr == 0x20) {
-        ESP_LOGI("process input", "Shoot fired!");
-        shoot();
+        // ESP_LOGI("debug", "%s %d", parsed_input, strlen(parsed_input));
     }
-    
-    if (*ptr == 'Z') {
-        ESP_LOGI("input", "Calibrating both axes...");
-        if (calibrate_turret() == ESP_OK) {
-            ESP_LOGI("input", "Dual calibration successful");
-        } else {
-            ESP_LOGI("input", "Calibration failed");
-        }
-    }
-    
-    // ESP_LOGI("debug", "%s %d", parsed_input, strlen(parsed_input));
 
-    free(parsed_input);
+    TickType_t end_time = xTaskGetTickCount();
+    uint32_t process_time = (end_time - start_time) * portTICK_PERIOD_MS;
+    
+    if (process_time > 10) { 
+        ESP_LOGW("PERF", "Slow processing: %lu ms for '%s'", process_time, input);
+    }
 }
 
 void uart_task(void *pvParameters) {
@@ -713,16 +878,18 @@ void tcp_server_task(void *pvParameters) {
             const char* welcome = "ESP32 Turret Controller Ready!\n";
             send(client_socket, welcome, strlen(welcome), 0);
             
-            uint8_t buffer[128];
-            char line_buffer[32];
+            uint8_t buffer[512];
+            char line_buffer[256];
             int line_pos = 0;
             
             while (1) {
                 int len = recv(client_socket, buffer, sizeof(buffer) - 1, 0);
+                
                 if (len <= 0) {
                     ESP_LOGI("TCP", "Client disconnected");
                     break;
                 }
+                uint32_t recv_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
                 for (int i = 0; i < len; i++) {
                     char c = buffer[i];
@@ -730,13 +897,19 @@ void tcp_server_task(void *pvParameters) {
                     if (c == '\n' || c == '\r') {
                         if (line_pos > 0) {
                             line_buffer[line_pos] = '\0';
+                            uint32_t process_start = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            ESP_LOGI("TCP", "RECV[%lu]: %s", recv_time, line_buffer);
+
                             ESP_LOGI("TCP", "Cmd: %s", line_buffer);
                             process_input(line_buffer);
-                            
-                            char response[64];
-                            snprintf(response, sizeof(response), "OK: X=%.1f Y=%.1f\n", 
-                                    turret_pos.x_angle, turret_pos.y_angle);
-                            send(client_socket, response, strlen(response), 0);
+
+                            uint32_t process_end = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            ESP_LOGI("TCP", "PROC[%lu]: %lu ms", process_end, process_end - process_start);
+
+                            // char response[64];
+                            // snprintf(response, sizeof(response), "OK: X=%.1f Y=%.1f\n", 
+                            //         turret_pos.x_angle, turret_pos.y_angle);
+                            // send(client_socket, response, strlen(response), 0);
                             
                             line_pos = 0; 
                         }
@@ -776,7 +949,7 @@ void app_main(void) {
 
     ESP_LOGI("MAIN", "Starting tasks...");
 
-    xTaskCreate(tcp_server_task, "tcp_server", 4096, NULL, 5, NULL);
+    xTaskCreate(tcp_server_task, "tcp_server", 4096, NULL, 15, NULL);
     xTaskCreate(motor_control_task, "motor_control", 8192, NULL, 10, &motor_control_task_handle);
     // xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL);
     
