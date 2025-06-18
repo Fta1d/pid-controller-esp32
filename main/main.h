@@ -98,9 +98,13 @@ typedef struct {
 
 typedef struct {
     uint16_t x_speed;      
-    uint16_t y_speed;      
-    bool x_direction;      
-    bool y_direction;      
+    uint16_t y_speed;
+    uint16_t x_speed_saved;
+    uint16_t y_speed_saved;   
+    bool x_direction;    
+    bool y_direction;
+    bool x_dir_saved;
+    bool y_dir_saved;      
     bool x_active;         
     bool y_active;         
 } analog_motor_state_t;

@@ -348,38 +348,6 @@ void stop_motors() {
     stop_motor(&motor_y);
 }
 
-void restore_motor_states(void) {
-    ESP_LOGI("motor", "Restoring motor states: X=%d, Y=%d", x_state, y_state);
-
-    if (x_state == MOTOR_FORWARD) {
-        stop_motor(&motor_x);
-        
-        ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-        ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-        ESP_LOGI("motor", "X motor restored: LEFT");
-    } else if (x_state == MOTOR_BACKWARD) {
-        stop_motor(&motor_x);
-        
-        ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-        ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-        ESP_LOGI("motor", "X motor restored: RIGHT");
-    }
-
-    if (y_state == MOTOR_FORWARD) {
-        stop_motor(&motor_y);
-        
-        ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-        ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-        ESP_LOGI("motor", "Y motor restored: UP");
-    } else if (y_state == MOTOR_BACKWARD) {
-        stop_motor(&motor_y);
-        
-        ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
-        ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
-        ESP_LOGI("motor", "Y motor restored: DOWN");
-    }
-}
-
 uint16_t speed_to_duty(uint8_t speed) {
     if (speed == 0) return 0;
 
@@ -387,62 +355,47 @@ uint16_t speed_to_duty(uint8_t speed) {
     uint16_t duty_range = MAX_PWM_DUTY - MIN_PWM_DUTY;
     uint16_t duty = MIN_PWM_DUTY + (uint16_t)(normalized * duty_range);
     
-    if (duty >= MAX_PWM_DUTY) duty = MAX_PWM_DUTY;
-    ESP_LOGI("ANALOG DUTY", "%d", duty);
+    // if (duty >= MAX_PWM_DUTY) duty = MAX_PWM_DUTY;
+
     return duty;
 }
 
-void parse_analog_command(const char *input) {
-    controls.up_pressed = false;
-    controls.down_pressed = false;
-    controls.left_pressed = false; 
-    controls.right_pressed = false;
+void shoot() {
+    // bool motors_were_running = (x_state == MOTOR_FORWARD || x_state == MOTOR_BACKWARD ||
+    //                            y_state == MOTOR_FORWARD || y_state == MOTOR_BACKWARD);
 
-    memset(&analog_state, 0, sizeof(analog_state));
+    // ESP_LOGI("shoot", "=== BEFORE SAVING ===");
+    // ESP_LOGI("shoot", "x_state:%d y_state:%d", (int)x_state, (int)y_state);
+    // ESP_LOGI("shoot", "analog_state.x_speed:%d y_speed:%d", analog_state.x_speed, analog_state.y_speed);
+    // ESP_LOGI("shoot", "analog_state.x_direction:%d y_direction:%d", (int)analog_state.x_direction, (int)analog_state.y_direction);
+
+    analog_state.x_speed_saved = analog_state.x_speed;
+    analog_state.y_speed_saved = analog_state.y_speed;
+    analog_state.x_dir_saved = analog_state.x_direction;
+    analog_state.y_dir_saved = analog_state.y_direction;
+
+    // ESP_LOGI("shoot", "=== AFTER SAVING ===");
+    // ESP_LOGI("shoot", "x_speed_saved:%d y_speed_saved:%d", analog_state.x_speed_saved, analog_state.y_speed_saved);
+    // ESP_LOGI("shoot", "x_dir_saved:%d y_dir_saved:%d", (int)analog_state.x_dir_saved, (int)analog_state.y_dir_saved);
+
+    // if (motors_were_running) {
+    //     ESP_LOGI("shoot", "Shooting initiated - motors will be restored after shot");
+    // } else {
+    //     ESP_LOGI("shoot", "Shooting initiated - no motors to restore");
+    // }
     
-    if (strcmp(input, "STOP") == 0) {
-        return;
-    }
+    stop_motors();
+    gpio_set_level(TRIGGER_PIN, 1);
+    
+    gptimer_alarm_config_t alarm_config = {
+        .alarm_count = MS_TO_US(shoot_time), 
+        .reload_count = 0,
+        .flags.auto_reload_on_alarm = false, 
+    };
 
-    const char *ptr = input;
-    while (*ptr) {
-        if (*ptr == 'L' || *ptr == 'R' || *ptr == 'U' || *ptr == 'D') {
-            char dir = *ptr++;
-
-            int speed = 0;
-            while (*ptr >= '0' && *ptr <= '9') {
-                speed = speed * 10 + (*ptr - '0');
-                ptr++;
-            }
-
-            ESP_LOGI("parse analog", "%d", speed);
-
-            switch (dir) {
-                case 'L':
-                    analog_state.x_active = true;
-                    analog_state.x_speed = speed;
-                    analog_state.x_direction = false;
-                    break;
-                case 'R':
-                    analog_state.x_active = true;
-                    analog_state.x_speed = speed;
-                    analog_state.x_direction = true;
-                    break;
-                case 'U':
-                    analog_state.y_active = true;
-                    analog_state.y_speed = speed;
-                    analog_state.y_direction = true;
-                    break;
-                case 'D':
-                    analog_state.y_active = true;
-                    analog_state.y_speed = speed;
-                    analog_state.y_direction = false;
-                    break;
-            }
-        } else {
-            ptr++;
-        }
-    }
+    gptimer_set_alarm_action(shot_timer, &alarm_config);
+    gptimer_set_raw_count(shot_timer, 0);
+    gptimer_start(shot_timer);
 }
 
 void set_motor_speed_analog(motor_t *motor, uint16_t speed, bool forward) {
@@ -500,28 +453,147 @@ void set_motor_speed_analog(motor_t *motor, uint16_t speed, bool forward) {
     }
 }
 
-void shoot() {
-    bool motors_were_running = (x_state == MOTOR_FORWARD || x_state == MOTOR_BACKWARD ||
-                               y_state == MOTOR_FORWARD || y_state == MOTOR_BACKWARD);
-    
-    if (motors_were_running) {
-        ESP_LOGI("shoot", "Shooting initiated - motors will be restored after shot");
-    } else {
-        ESP_LOGI("shoot", "Shooting initiated - no motors to restore");
-    }
-    
-    stop_motors();
-    gpio_set_level(TRIGGER_PIN, 1);
-    
-    gptimer_alarm_config_t alarm_config = {
-        .alarm_count = MS_TO_US(shoot_time), 
-        .reload_count = 0,
-        .flags.auto_reload_on_alarm = false, 
-    };
+void restore_motor_states_gamepad(void) {
+    // ESP_LOGI("restore state", "=== RESTORE DEBUG ===");
+    // ESP_LOGI("restore state", "x_state:%d y_state:%d", (int)x_state, (int)y_state);
+    // ESP_LOGI("restore state", "x_speed_saved:%d y_speed_saved:%d", analog_state.x_speed_saved, analog_state.y_speed_saved);
+    // ESP_LOGI("restore state", "x_dir_saved:%d y_dir_saved:%d", (int)analog_state.x_dir_saved, (int)analog_state.y_dir_saved);
+    // ESP_LOGI("restore state", "x_active:%d y_active:%d", (int)analog_state.x_active, (int)analog_state.y_active);
 
-    gptimer_set_alarm_action(shot_timer, &alarm_config);
-    gptimer_set_raw_count(shot_timer, 0);
-    gptimer_start(shot_timer);
+
+    if (x_state != MOTOR_STOPPED) {
+        // ESP_LOGI("restore state", "Restoring x motor: %d %d", analog_state.x_speed_saved, analog_state.x_dir_saved);
+        set_motor_speed_analog(&motor_x, analog_state.x_speed_saved, analog_state.x_dir_saved);
+    }
+
+    if (y_state != MOTOR_STOPPED) {
+        // ESP_LOGI("restore state", "Restoring y motor: %d %d", analog_state.y_speed_saved, analog_state.y_dir_saved);
+        set_motor_speed_analog(&motor_y, analog_state.y_speed_saved, analog_state.y_dir_saved);
+    }
+
+}
+
+void restore_motor_states(void) {
+    // ESP_LOGI("motor", "Restoring motor states: X=%d, Y=%d", x_state, y_state);
+
+    if (x_state == MOTOR_FORWARD) {
+        stop_motor(&motor_x);
+
+        ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY);
+        ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
+
+        // ledc_set_fade_with_time(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+        // ledc_fade_start(LEDC_MODE, X_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+
+        // ESP_LOGI("motor", "X motor restored: LEFT");
+    } else if (x_state == MOTOR_BACKWARD) {
+        stop_motor(&motor_x);
+
+        ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY);
+        ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
+
+        // ledc_set_fade_with_time(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+        // ledc_fade_start(LEDC_MODE, X_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+        
+        // ESP_LOGI("motor", "X motor restored: RIGHT");
+    }
+
+    if (y_state == MOTOR_FORWARD) {
+        stop_motor(&motor_y);
+    
+        ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY);
+        ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
+
+        // ledc_set_fade_with_time(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+        // ledc_fade_start(LEDC_MODE, Y_IN1_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+        
+        // ESP_LOGI("motor", "Y motor restored: UP");
+    } else if (y_state == MOTOR_BACKWARD) {
+        stop_motor(&motor_y);
+        
+        ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY);
+        ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
+
+        // ledc_set_fade_with_time(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY, ACCEL_TIME_MS);
+        // ledc_fade_start(LEDC_MODE, Y_IN2_LEDC_CHANNEL, LEDC_FADE_NO_WAIT);
+        
+        // ESP_LOGI("motor", "Y motor restored: DOWN");
+    }
+}
+
+void reset_current_analog_state(void) {
+    analog_state.x_speed = 0;
+    analog_state.y_speed = 0;
+    analog_state.x_direction = false;
+    analog_state.y_direction = false;
+    analog_state.x_active = false;
+    analog_state.y_active = false;
+}
+
+void parse_analog_command(const char *input) {
+    // ESP_LOGI("parse", "=== PARSE INPUT: '%s' ===", input);
+    // ESP_LOGI("parse", "BEFORE: x_speed=%d y_speed=%d", analog_state.x_speed, analog_state.y_speed);
+    
+    controls.up_pressed = false;
+    controls.down_pressed = false;
+    controls.left_pressed = false; 
+    controls.right_pressed = false;
+
+    if (strcmp(input, "SHOOT") == 0) {
+        shoot();
+        return;
+    }
+
+    reset_current_analog_state();
+    
+    if (strcmp(input, "STOP") == 0) {
+        return;
+    }
+
+    int speed = 0;
+    const char *ptr = input;
+    while (*ptr) {
+        if (*ptr == 'L' || *ptr == 'R' || *ptr == 'U' || *ptr == 'D') {
+            char dir = *ptr++;
+
+            while (*ptr >= '0' && *ptr <= '9') {
+                speed = speed * 10 + (*ptr - '0');
+                ptr++;
+            }
+
+            switch (dir) {
+                case 'L':
+                    analog_state.x_active = true;
+                    analog_state.x_speed = speed;
+                    analog_state.x_direction = false;
+                    break;
+                case 'R':
+                    analog_state.x_active = true;
+                    analog_state.x_speed = speed;
+                    analog_state.x_direction = true;
+                    break;
+                case 'U':
+                    analog_state.y_active = true;
+                    analog_state.y_speed = speed;
+                    analog_state.y_direction = true;
+                    break;
+                case 'D':
+                    analog_state.y_active = true;
+                    analog_state.y_speed = speed;
+                    analog_state.y_direction = false;
+                    break;
+            }
+            speed = 0;
+        } else {
+            ptr++;
+        }
+    }
+
+    // ESP_LOGI("parse", "AFTER: x_speed=%d y_speed=%d x_dir=%d y_dir=%d", 
+    //          analog_state.x_speed, analog_state.y_speed, 
+    //          (int)analog_state.x_direction, (int)analog_state.y_direction);
+    // ESP_LOGI("parse", "ACTIVE: x_active=%d y_active=%d", 
+    //          (int)analog_state.x_active, (int)analog_state.y_active);
 }
 
 void motor_control_task(void *pvParameters) {
@@ -543,8 +615,7 @@ void motor_control_task(void *pvParameters) {
         
         if (ulTaskNotifyTake(pdTRUE, 0) > 0) {
             ESP_LOGI("motor", "Restoring motors after shot");
-            vTaskDelay(pdMS_TO_TICKS(50)); 
-            restore_motor_states();
+            analog_mode_active ? restore_motor_states_gamepad() : restore_motor_states();
         }
 
         if (as5600_read_angle_degrees_sliding(y_encoder, &y_raw_angle, 20) == ESP_OK) {
@@ -658,6 +729,8 @@ void process_input(char *input) {
     bool is_analog = false;
     if (len == 4 && strcmp(parsed_input, "STOP") == 0) {
         is_analog = true;
+    } else if (len == 5 && strcmp(parsed_input, "SHOOT") == 0) {
+        is_analog = true;
     } else if (len > 0 && (parsed_input[0] == 'L' || parsed_input[0] == 'R' || 
                           parsed_input[0] == 'U' || parsed_input[0] == 'D')) {
         is_analog = true;
@@ -737,22 +810,14 @@ void process_input(char *input) {
         if (*ptr == '+') {
             uint16_t temp_duty = DUTY + DUTY_STEP;
 
-            if (temp_duty > MAX_PWM_DUTY) {
-                DUTY = MAX_PWM_DUTY;
-            } else {
-                DUTY = temp_duty;
-            }
+            temp_duty > MAX_PWM_DUTY ? (DUTY = MAX_PWM_DUTY) : (DUTY = temp_duty);
 
             ESP_LOGI("duty", "Duty set to: %d", (int)DUTY);
         }
         if (*ptr == '-') {
             uint16_t temp_duty = DUTY - DUTY_STEP;
 
-            if (temp_duty < MIN_PWM_DUTY) {
-                DUTY = MIN_PWM_DUTY;
-            } else {
-                DUTY = temp_duty;
-            }
+            temp_duty < MIN_PWM_DUTY ? (DUTY = MIN_PWM_DUTY) : (DUTY = temp_duty);
 
             ESP_LOGI("duty", "Duty set to: %d", (int)DUTY);
         }
@@ -760,24 +825,16 @@ void process_input(char *input) {
         if (*ptr == 'n') {
             uint16_t temp_shoot_time = shoot_time - 10;
 
-            if (temp_shoot_time <= MIN_SHOOT_TIME) {
-                shoot_time = MIN_SHOOT_TIME;
-            } else {
-                shoot_time = temp_shoot_time;
-            }
+            temp_shoot_time <= MIN_SHOOT_TIME ? (shoot_time = MIN_SHOOT_TIME) : (shoot_time = temp_shoot_time);
 
-            ESP_LOGI("shoot time", "Time set to: %d", (int)shoot_time);
+            ESP_LOGI("shoot time", "Shoot time set to: %d", (int)shoot_time);
         }
         if (*ptr == 'm') {
             uint16_t temp_shoot_time = shoot_time + 10;
 
-            if (temp_shoot_time >= MAX_SHOOT_TIME) {
-                shoot_time = MAX_SHOOT_TIME;
-            } else {
-                shoot_time = temp_shoot_time;
-            }
+            temp_shoot_time >= MAX_SHOOT_TIME ? (shoot_time = MAX_SHOOT_TIME) : (shoot_time = temp_shoot_time);
 
-            ESP_LOGI("shoot time", "Time set to: %d", (int)shoot_time);
+            ESP_LOGI("shoot time", "Shoot time set to: %d", (int)shoot_time);
         }
 
         if (*ptr == 'p') {
@@ -889,7 +946,7 @@ void tcp_server_task(void *pvParameters) {
                     ESP_LOGI("TCP", "Client disconnected");
                     break;
                 }
-                uint32_t recv_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                // uint32_t recv_time = xTaskGetTickCount() * portTICK_PERIOD_MS;
 
                 for (int i = 0; i < len; i++) {
                     char c = buffer[i];
@@ -897,14 +954,14 @@ void tcp_server_task(void *pvParameters) {
                     if (c == '\n' || c == '\r') {
                         if (line_pos > 0) {
                             line_buffer[line_pos] = '\0';
-                            uint32_t process_start = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                            ESP_LOGI("TCP", "RECV[%lu]: %s", recv_time, line_buffer);
+                            // uint32_t process_start = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            // ESP_LOGI("TCP", "RECV[%lu]: %s", recv_time, line_buffer);
 
-                            ESP_LOGI("TCP", "Cmd: %s", line_buffer);
+                            // ESP_LOGI("TCP", "Cmd: %s", line_buffer);
                             process_input(line_buffer);
 
-                            uint32_t process_end = xTaskGetTickCount() * portTICK_PERIOD_MS;
-                            ESP_LOGI("TCP", "PROC[%lu]: %lu ms", process_end, process_end - process_start);
+                            // uint32_t process_end = xTaskGetTickCount() * portTICK_PERIOD_MS;
+                            // ESP_LOGI("TCP", "PROC[%lu]: %lu ms", process_end, process_end - process_start);
 
                             // char response[64];
                             // snprintf(response, sizeof(response), "OK: X=%.1f Y=%.1f\n", 

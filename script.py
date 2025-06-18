@@ -118,7 +118,7 @@ class TurretController:
                 for event in events:
                     if event.type == pygame.JOYBUTTONDOWN:
                         if event.button == 2:  # Shoot
-                            self.send_to_esp32(" ")
+                            self.send_to_esp32("SHOOT")
                         elif event.button == 1:  # Return to keyboard
                             print("Returning to keyboard mode")
                             self.send_to_esp32("STOP")
