@@ -1,2 +1,23 @@
-idf_component_register(SRCS "main.c"
-                    INCLUDE_DIRS ".")
+idf_component_register(
+    SRCS 
+        "main.c"
+        "src/motor.c"
+        "src/wifi_ap.c" 
+        "src/tcp_server.c"
+        "src/trigger.c"
+        "src/encoder.c"
+        "src/uart.c"
+        "src/pid.c"
+        "src/utils.c"
+    INCLUDE_DIRS 
+        "include"
+    REQUIRES 
+        "as5600" 
+        nvs_flash 
+        esp_wifi 
+        esp_netif 
+        esp_event 
+        lwip
+        driver
+        freertos
+)
