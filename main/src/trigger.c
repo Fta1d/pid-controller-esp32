@@ -99,10 +99,11 @@ esp_err_t trigger_init(void) {
 void trigger_shoot(void) {
     // ESP_LOGI(TAG, "=== SHOOTING SEQUENCE STARTED ===");
 
-    analog_state.x_speed_saved = analog_state.x_speed;
-    analog_state.y_speed_saved = analog_state.y_speed;
-    analog_state.x_dir_saved = analog_state.x_direction;
-    analog_state.y_dir_saved = analog_state.y_direction;
+    x_motor.duty_saved = x_motor.duty;
+    y_motor.duty_saved = y_motor.duty;
+
+    x_motor.dir_saved = x_motor.dir;
+    y_motor.dir_saved = y_motor.dir;
 
     // ESP_LOGI(TAG, "Motor states saved - X: speed=%.3f dir=%d, Y: speed=%.3f dir=%d", 
     //          analog_state.x_speed_saved, (int)analog_state.x_dir_saved,

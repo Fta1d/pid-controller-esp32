@@ -82,16 +82,17 @@ esp_err_t motor_init_pwm(void) {
     return ESP_OK;
 }
 
-void motor_stop(motor_t *motor) {
+void motor_stop(motor_channels_t *motor) {
     ledc_set_duty(LEDC_MODE, motor->in1_channel, 0);
     ledc_set_duty(LEDC_MODE, motor->in2_channel, 0);
     ledc_update_duty(LEDC_MODE, motor->in1_channel);
     ledc_update_duty(LEDC_MODE, motor->in2_channel);
+    // x_state = MOTOR_STOPPED;
 }
 
 void motor_stop_all(void) {
-    motor_stop(&motor_x);
-    motor_stop(&motor_y);
+    motor_stop(&motor_x_channels);
+    motor_stop(&motor_y_channels);
 }
 
 uint16_t motor_speed_to_duty(float speed) {
@@ -103,28 +104,28 @@ uint16_t motor_speed_to_duty(float speed) {
     return duty;
 }
 
-void motor_set_speed_analog(motor_t *motor, float speed, bool forward) {
+void motor_set_speed_analog(motor_channels_t *motor, float speed, bool forward) {
     // uint16_t duty = motor_speed_to_duty(speed);
     
     static float last_x_speed = 0.0;
     static float last_y_speed = 0.0;
     
-    if (motor == &motor_x) {
+    if (motor == &motor_x_channels) {
         motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
                                      (forward ? MOTOR_BACKWARD : MOTOR_FORWARD);
         
         if (x_state == desired_state && speed > 0 && last_x_speed == speed) {
-            return; 
+            ESP_LOGW(TAG, "In set speed analog IF (X)!");
         }
         x_state = desired_state;
         last_x_speed = speed;
         
-    } else if (motor == &motor_y) {
+    } else if (motor == &motor_y_channels) {
         motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
                                      (forward ? MOTOR_FORWARD : MOTOR_BACKWARD);
 
         if (y_state == desired_state && speed > 0 && last_y_speed == speed) {
-            return;
+            ESP_LOGW(TAG, "In set speed analog IF (Y)!");
         }
         y_state = desired_state;
         last_y_speed = speed;
@@ -151,36 +152,47 @@ void motor_set_speed_analog(motor_t *motor, float speed, bool forward) {
 
 void motor_restore_states_gamepad(void) {
     if (x_state != MOTOR_STOPPED) {
-        motor_set_speed_analog(&motor_x, analog_state.x_speed_saved, analog_state.x_dir_saved);
+        // ESP_LOGI(TAG, "RESTORING X dir: %d, speed: %d", (int)analog_state.x_dir_saved, (int)analog_state.x_speed_saved);
+
+        x_motor.duty = x_motor.duty_saved;
+        x_motor.dir = x_motor.dir_saved;
+
+        xEventGroupSetBits(motor_control_event_group, MOTOR_UPDATE_EVENT_X);
+        // motor_set_speed_analog(&motor_x, analog_state.x_speed_saved, analog_state.x_dir_saved);
     }
 
     if (y_state != MOTOR_STOPPED) {
-        ESP_LOGI(TAG, "RESTORING Y dir: %d", (int)analog_state.y_dir_saved);
-        motor_set_speed_analog(&motor_y, analog_state.y_speed_saved, analog_state.y_dir_saved);
+        // ESP_LOGI(TAG, "RESTORING Y dir: %d, speed: %d", (int)analog_state.y_dir_saved, (int)analog_state.y_speed_saved);
+
+        y_motor.duty = y_motor.duty_saved;
+        y_motor.dir = y_motor.dir_saved;
+
+        xEventGroupSetBits(motor_control_event_group, MOTOR_UPDATE_EVENT_Y);
+        // motor_set_speed_analog(&motor_y, analog_state.y_speed_saved, analog_state.y_dir_saved);
     }
 }
 
-void motor_restore_states(void) {
-    if (x_state == MOTOR_FORWARD) {
-        motor_stop(&motor_x);
-        ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY);
-        ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
-    } else if (x_state == MOTOR_BACKWARD) {
-        motor_stop(&motor_x);
-        ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY);
-        ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
-    }
+// void motor_restore_states(void) {
+//     if (x_state == MOTOR_FORWARD) {
+//         motor_stop(&motor_x);
+//         ledc_set_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL, DUTY);
+//         ledc_update_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL);
+//     } else if (x_state == MOTOR_BACKWARD) {
+//         motor_stop(&motor_x);
+//         ledc_set_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL, DUTY);
+//         ledc_update_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL);
+//     }
 
-    if (y_state == MOTOR_FORWARD) {
-        motor_stop(&motor_y);
-        ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY);
-        ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
-    } else if (y_state == MOTOR_BACKWARD) {
-        motor_stop(&motor_y);
-        ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY);
-        ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
-    }
-}
+//     if (y_state == MOTOR_FORWARD) {
+//         motor_stop(&motor_y);
+//         ledc_set_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL, DUTY);
+//         ledc_update_duty(LEDC_MODE, Y_IN1_LEDC_CHANNEL);
+//     } else if (y_state == MOTOR_BACKWARD) {
+//         motor_stop(&motor_y);
+//         ledc_set_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL, DUTY);
+//         ledc_update_duty(LEDC_MODE, Y_IN2_LEDC_CHANNEL);
+//     }
+// }
 
 bool motor_is_movement_allowed(char motor, bool dir, float angle) {
     if (motor == 'X') {
@@ -209,10 +221,6 @@ void motor_control_task(void *pvParameters) {
     motor_control_task_handle = xTaskGetCurrentTaskHandle();
     EventBits_t events;
 
-
-    turret_pos.y_angle = 0.0f;
-    float y_raw_angle;
-
     while (1) {
         if (trigger_is_shoot_requested()) {
             ESP_LOGI(TAG, "Shoot requested from interrupt");
@@ -224,8 +232,8 @@ void motor_control_task(void *pvParameters) {
             motor_restore_states_gamepad();
         }
 
-        if (encoder_read_y_angle(&y_raw_angle) == ESP_OK) {
-            turret_pos.y_angle = y_raw_angle;
+        if (encoder_read_y_angle() == ESP_OK) {
+            // turret_pos.y_angle = y_raw_angle;
         }
 
         events = xEventGroupWaitBits(
@@ -246,31 +254,31 @@ void motor_control_task(void *pvParameters) {
 
 
             ESP_LOGI(TAG, "Updating motor X: freq=%d, dir=%d", 
-                   (int)analog_state.x_speed, (int)analog_state.x_direction);
+                   (int)x_motor.duty, (int)x_motor.dir);
 
-            motor_set_speed_analog(&motor_x, analog_state.x_speed, analog_state.x_direction);
+            motor_set_speed_analog(&motor_x_channels, x_motor.duty, x_motor.dir);
         }
         
         if (events & MOTOR_UPDATE_EVENT_Y) {
-            if (!motor_is_movement_allowed('Y', analog_state.y_direction, turret_pos.y_angle)) {
+            if (!motor_is_movement_allowed('Y', y_motor.dir, y_motor.angle)) {
                 ESP_LOGW(TAG, "Y motor movement blocked by limit");
-                analog_state.y_speed = 0;
+                y_motor.duty = 0;
                 continue;
             }
 
             ESP_LOGI(TAG, "Updating motor Y: freq=%d, dir=%d", 
-                   (int)analog_state.y_speed, (int)analog_state.y_direction);
+                   (int)y_motor.duty, (int)y_motor.dir);
 
-            motor_set_speed_analog(&motor_y, analog_state.y_speed, analog_state.y_direction);
+            motor_set_speed_analog(&motor_y_channels, y_motor.duty, y_motor.dir);
         }
         
         if (events & MOTOR_STOP_EVENT) {
-            printf("Stopping all motors\n");
+            ESP_LOGI(TAG, "Stopping all motors");
             motor_stop_all();
         }
         
         if (events & MOTOR_SHOOT_EVENT) {
-            printf("Executing shoot sequence\n");
+            ESP_LOGI(TAG, "Executing shoot sequence");
             trigger_shoot();
         }
 

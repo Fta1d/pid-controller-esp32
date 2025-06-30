@@ -3,7 +3,6 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include <stdatomic.h>
 #include "driver/ledc.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
@@ -30,7 +29,7 @@
 #define LEDC_FREQUENCY          4000
 #define PWM_CHANNELS_NUM        4
 #define MAX_PWM_DUTY            4095
-#define MIN_PWM_DUTY            2500
+#define MIN_PWM_DUTY            2700
 #define DEFAULT_DUTY            4095
 #define DUTY_STEP               100
 
@@ -57,12 +56,14 @@
 // === MOVEMENT LIMITS ===
 #define MAX_Y_ANGLE             138.0f
 #define MIN_Y_ANGLE             103.0f
+#define MAX_X_ANGLE             0.0f
+#define MIN_X_ANGLE             0.0f
 
 // === TIMING ===
 #define MS_TO_US(ms)            ((ms) * 1000)
 #define MIN_SHOOT_TIME          10
 #define MAX_SHOOT_TIME          100
-#define DEF_SHOOT_TIME          10
+#define DEF_SHOOT_TIME          50
 #define ACCEL_TIME_MS           100
 
 #define MOTOR_UPDATE_EVENT_X    (1 << 0)
@@ -88,35 +89,25 @@ typedef enum {
 typedef struct {
     ledc_channel_t in1_channel;
     ledc_channel_t in2_channel;
-    volatile int16_t encoder_pos;
     char name[2];
+} motor_channels_t;
+
+typedef struct {
+    float duty;
+    float duty_saved;
+
+    float angle;
+
+    bool dir;
+    bool dir_saved;
+    bool active;
 } motor_t;
 
-typedef struct {
-    float x_speed;
-    float y_speed;
-    float x_speed_saved;
-    float y_speed_saved;
-    bool x_direction;
-    bool y_direction;
-    bool x_dir_saved;
-    bool y_dir_saved;
-    bool x_active;
-    bool y_active;
-} analog_motor_state_t;
-
-typedef struct {
-    float x_angle;
-    float y_angle;
-    float target_x;
-    float target_y;
-} turret_position_t;
-
 // === GLOBAL INSTANCES ===
-extern motor_t motor_x;
-extern motor_t motor_y;
-extern turret_position_t turret_pos;
-extern analog_motor_state_t analog_state;
+extern motor_channels_t motor_x_channels;
+extern motor_channels_t motor_y_channels;
+extern motor_t x_motor;
+extern motor_t y_motor;
 extern motor_state_t y_state;
 extern motor_state_t x_state;
 

@@ -10,30 +10,29 @@
 #include "trigger.h"
 #include "encoder.h"
 #include "uart.h"
+#include "pid.h"
 
 uint16_t DUTY = DEFAULT_DUTY;
 uint16_t shoot_time = DEF_SHOOT_TIME;
 gptimer_handle_t shot_timer = NULL;
 
-motor_t motor_x = {
+motor_channels_t motor_x_channels = {
     .in1_channel = X_IN1_LEDC_CHANNEL,
     .in2_channel = X_IN2_LEDC_CHANNEL,
-    .encoder_pos = 0,
     .name = "X"
 };
 
-motor_t motor_y = {
+motor_channels_t motor_y_channels = {
     .in1_channel = Y_IN1_LEDC_CHANNEL,
     .in2_channel = Y_IN2_LEDC_CHANNEL,
-    .encoder_pos = 0,
     .name = "Y"
 };
 
 EventGroupHandle_t motor_control_event_group;
 TaskHandle_t motor_control_task_handle;
 
-turret_position_t turret_pos = {0};
-analog_motor_state_t analog_state = {0};
+motor_t x_motor = {0};
+motor_t y_motor = {0};
 motor_state_t y_state = MOTOR_STOPPED;
 motor_state_t x_state = MOTOR_STOPPED;
 
@@ -66,7 +65,10 @@ void app_main(void) {
     
     xTaskCreate(tcp_server_task, "tcp_server", 4096, NULL, 15, NULL);
     xTaskCreate(motor_control_task, "motor_control", 4096, NULL, 10, &motor_control_task_handle);
+    pid_task_create();
+    encoder_task_create();
     trigger_set_motor_task_handle(motor_control_task_handle);
+
     // xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL); 
     
     ESP_LOGI(TAG, "=== ESP32 Turret Controller Ready ===");

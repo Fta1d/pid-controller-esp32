@@ -245,45 +245,105 @@ esp_err_t as5600_read_angle_degrees(as5600_handle_t handle, float *degrees)
     return ESP_OK;
 }
 
-esp_err_t as5600_read_angle_degrees_sliding(as5600_handle_t handle, float *degrees, const uint16_t window_size) {
-    static float *samples = NULL;
-    static uint16_t current_window_size = 0;
-    static uint16_t index = 0;
-    static uint16_t count = 0;
-    static float last_sum = 0.0;
-    
-    ESP_RETURN_ON_FALSE(handle != NULL, ESP_ERR_INVALID_ARG, TAG, "Handle is NULL");
-    ESP_RETURN_ON_FALSE(degrees != NULL, ESP_ERR_INVALID_ARG, TAG, "Degrees pointer is NULL");
-    ESP_RETURN_ON_FALSE(window_size > 0, ESP_ERR_INVALID_ARG, TAG, "Window size must be > 0");
-
-    if (current_window_size != window_size) {
-        if (samples) free(samples);
-        samples = calloc(window_size, sizeof(float));
-        ESP_RETURN_ON_FALSE(samples != NULL, ESP_ERR_NO_MEM, TAG, "Failed to allocate buffer");
-        current_window_size = window_size;
-        index = 0;
-        count = 0;
-        last_sum = 0.0;
+int as5600_read_angle_degrees_sliding(as5600_handle_t handle, as5600_sliding_window_t *sw, float *degrees) {
+    if (handle == NULL || sw == NULL || degrees == NULL) {
+        printf("%s: Invalid parameters\n", TAG);
+        return -1;
     }
-
+    
     uint16_t angle;
-    ESP_RETURN_ON_ERROR(as5600_read_angle(handle, &angle), TAG, "Failed to read angle");
+    if (as5600_read_angle(handle, &angle) == -1) {
+        printf("%s: Failed to read angle\n", TAG);
+        return -1;
+    }
+    
     float new_value = as5600_raw_to_degrees(angle);
+    
+    if (sw->count >= sw->window_size) {
+        sw->last_sum -= sw->samples[sw->index];
+    }
+    
+    sw->samples[sw->index] = new_value;
+    sw->last_sum += new_value;
+    sw->index = (sw->index + 1) % sw->window_size;
+    
+    if (sw->count < sw->window_size) {
+        sw->count++;
+    }
+    
+    *degrees = sw->last_sum / sw->count;
+    return 0;
+}
 
-    if (count >= window_size) {
-        last_sum -= samples[index]; 
+as5600_sliding_window_t* as5600_sliding_window_create(uint16_t window_size) {
+    if (window_size == 0) {
+        printf("%s: Window size must be > 0\n", TAG);
+        return NULL;
     }
     
-    samples[index] = new_value;
-    last_sum += new_value;
-    index = (index + 1) % window_size;
-    
-    if (count < window_size) {
-        count++;
+    as5600_sliding_window_t *sw = malloc(sizeof(as5600_sliding_window_t));
+    if (sw == NULL) {
+        printf("%s: Failed to allocate sliding window structure\n", TAG);
+        return NULL;
     }
     
-    *degrees = last_sum / count;
-    return ESP_OK;
+    sw->samples = calloc(window_size, sizeof(float));
+    if (sw->samples == NULL) {
+        printf("%s: Failed to allocate buffer\n", TAG);
+        free(sw);
+        return NULL;
+    }
+    
+    sw->window_size = window_size;
+    sw->index = 0;
+    sw->count = 0;
+    sw->last_sum = 0.0;
+    
+    return sw;
+}
+
+void as5600_sliding_window_destroy(as5600_sliding_window_t *sw) {
+    if (sw) {
+        if (sw->samples) {
+            free(sw->samples);
+        }
+        free(sw);
+    }
+}
+
+int as5600_sliding_window_resize(as5600_sliding_window_t *sw, uint16_t new_window_size) {
+    if (sw == NULL || new_window_size == 0) {
+        return -1;
+    }
+    
+    if (sw->window_size != new_window_size) {
+        free(sw->samples);
+        sw->samples = calloc(new_window_size, sizeof(float));
+        if (sw->samples == NULL) {
+            printf("%s: Failed to allocate buffer\n", TAG);
+            return -1;
+        }
+        sw->window_size = new_window_size;
+        sw->index = 0;
+        sw->count = 0;
+        sw->last_sum = 0.0;
+    }
+    
+    return 0;
+}
+
+void as5600_sliding_window_clear(as5600_sliding_window_t *sw) {
+    if (sw == NULL) {
+        return;
+    }
+
+    if (sw->samples) {
+        memset(sw->samples, 0, sw->window_size * sizeof(float));
+    }
+
+    sw->index = 0;
+    sw->count = 0;
+    sw->last_sum = 0.0;
 }
 
 esp_err_t as5600_read_angle_radians(as5600_handle_t handle, float *radians)

@@ -2,10 +2,14 @@
 #include "config.h"
 #include "esp_log.h"
 
+#include "motor.h"
+
 static const char *TAG = "ENCODER";
 
 as5600_handle_t x_encoder = NULL;
 as5600_handle_t y_encoder = NULL;
+as5600_sliding_window_t *x_sw = NULL;
+as5600_sliding_window_t *y_sw = NULL;
 
 esp_err_t encoder_init_dual(void) {
     ESP_LOGI(TAG, "Initializing dual AS5600 encoders...");
@@ -68,27 +72,34 @@ esp_err_t encoder_init_dual(void) {
     }
     
     as5600_print_diagnostics(y_encoder);
+
+    // as5600_read_angle_degrees(x_encoder, &x_motor.angle);
+    as5600_read_angle_degrees(y_encoder, &y_motor.angle);
+
+    // Initialize sliding windows
+    // x_sw = as5600_sliding_window_create(10);
+    y_sw = as5600_sliding_window_create(10);
     
     ESP_LOGI(TAG, "Encoder initialization completed");
     return ESP_OK;
 }
 
-esp_err_t encoder_read_y_angle(float *angle) {
+esp_err_t encoder_read_y_angle(void) {
     if (y_encoder == NULL) {
         ESP_LOGE(TAG, "Y encoder not initialized");
         return ESP_FAIL;
     }
     
-    return as5600_read_angle_degrees_sliding(y_encoder, angle, 5);
+    return as5600_read_angle_degrees_sliding(y_encoder, y_sw, &y_motor.angle);
 }
 
-esp_err_t encoder_read_x_angle(float *angle) {
+esp_err_t encoder_read_x_angle(void) {
     if (x_encoder == NULL) {
         ESP_LOGE(TAG, "X encoder not initialized");
         return ESP_FAIL;
     }
     
-    return as5600_read_angle_degrees_sliding(x_encoder, angle, 5);
+    return as5600_read_angle_degrees_sliding(x_encoder, x_sw, &x_motor.angle);
 }
 
 esp_err_t encoder_calibrate_turret(void) {
@@ -121,8 +132,8 @@ esp_err_t encoder_calibrate_turret(void) {
     }
     
     if (y_ret == ESP_OK && (x_encoder == NULL || x_ret == ESP_OK)) {
-        turret_pos.x_angle = 0.0f;
-        turret_pos.y_angle = 0.0f;
+        x_motor.angle = 0.0f;
+        y_motor.angle = 0.0f;
         ESP_LOGI(TAG, "Dual calibration complete - both axes zeroed");
         return ESP_OK;
     } else {
@@ -166,4 +177,35 @@ esp_err_t encoder_get_status(void) {
     }
     
     return ESP_OK;
+}
+
+static void encoder_task(void *pvParemeters) {
+    while (true) {
+        encoder_read_y_angle();
+
+        // if (LOG_STATE) printf("%f || %f\n", motor_x.angle, motor_y.angle);
+    
+        // if (x_motor.duty > 0 && x_state != MOTOR_STOPPED ) {
+        //     if ((x_motor.dir && x_motor.angle >= MAX_X_ANGLE) ||
+        //         (!x_motor.dir && x_motor.angle <= MIN_X_ANGLE)) {
+        //             motor_stop(&motor_x_channels);
+        //             ESP_LOGE(TAG, "Emergency stop X at %.2f degrees", x_motor.angle);
+        //     }
+        // }
+        
+        if (y_motor.duty > 0 && y_state != MOTOR_STOPPED) {
+            if ((!y_motor.dir && y_motor.angle >= MAX_Y_ANGLE) ||
+                (y_motor.dir && y_motor.angle <= MIN_Y_ANGLE)) {
+                    motor_stop(&motor_y_channels);
+                    ESP_LOGE(TAG, "Emergency stop Y at %.2f degrees", y_motor.angle);
+            }
+        }
+
+        vTaskDelay(pdMS_TO_TICKS(10));
+    }
+    
+}
+
+void encoder_task_create(void) {
+    xTaskCreate(encoder_task, "encoder", 4096, NULL, 9, NULL);
 }

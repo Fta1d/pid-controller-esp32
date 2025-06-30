@@ -164,6 +164,14 @@ typedef struct {
     bool magnet_too_weak;             ///< Magnet too weak flag
 } as5600_data_t;
 
+typedef struct {
+    float *samples;
+    uint16_t window_size;
+    uint16_t index;
+    uint16_t count;
+    float last_sum;
+} as5600_sliding_window_t;
+
 /**
  * @brief AS5600 magnet status
  */
@@ -268,7 +276,11 @@ esp_err_t as5600_read_angle_degrees(as5600_handle_t handle, float *degrees);
  * @param sample_rate How often do you want to read data
  * @return ESP_OK on success
  */
-esp_err_t as5600_read_angle_degrees_sliding(as5600_handle_t handle, float *degrees, const uint16_t sample_rate);
+int as5600_read_angle_degrees_sliding(as5600_handle_t handle, as5600_sliding_window_t *sw, float *degrees);
+as5600_sliding_window_t* as5600_sliding_window_create(uint16_t window_size);
+void as5600_sliding_window_destroy(as5600_sliding_window_t *sw);
+int as5600_sliding_window_resize(as5600_sliding_window_t *sw, uint16_t new_window_size);
+void as5600_sliding_window_clear(as5600_sliding_window_t *sw);
 
 /**
  * @brief Read angle in radians (0-2π)

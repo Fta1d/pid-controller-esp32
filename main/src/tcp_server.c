@@ -1,6 +1,7 @@
 #include "tcp_server.h"
 #include "wifi_ap.h"
 #include "motor.h"
+#include "pid.h"
 #include "trigger.h"
 #include "encoder.h"
 #include "esp_log.h"
@@ -13,16 +14,6 @@
 static const char *TAG = "TCP";
 static int tcp_server_socket = -1;
 static int client_socket = -1;
-static bool analog_mode_active = false;
-
-void reset_current_analog_state(void) {
-    analog_state.x_speed = 0;
-    analog_state.y_speed = 0;
-    analog_state.x_direction = false;
-    analog_state.y_direction = false;
-    analog_state.x_active = false;
-    analog_state.y_active = false;
-}
 
 // void parse_analog_command(const char *input) {
 //     ESP_LOGI(TAG, "Parsing analog command: '%s'", input);
@@ -153,12 +144,12 @@ void process_input(char *input) {
             float f_value = atoff(value);
 
             if (value && dir) {
-                analog_state.x_speed = motor_speed_to_duty(f_value);
-                analog_state.x_direction = atoi(dir);
+                x_motor.duty = motor_speed_to_duty(f_value);
+                x_motor.dir = atoi(dir);
 
                 xEventGroupSetBits(motor_control_event_group, MOTOR_UPDATE_EVENT_X);
             } else {
-                ESP_LOGE("TCP", "Missing parameters for SETX!");
+                ESP_LOGE("TCP", "Missing parameters for %s!", cmd);
             }
             break;
         }
@@ -169,12 +160,12 @@ void process_input(char *input) {
             float f_value = atoff(value);
 
             if (value && dir) {
-                analog_state.y_speed = motor_speed_to_duty(f_value);
-                analog_state.y_direction = atoi(dir);
+                y_motor.duty = motor_speed_to_duty(f_value);
+                y_motor.dir = atoi(dir);
 
                 xEventGroupSetBits(motor_control_event_group, MOTOR_UPDATE_EVENT_Y);
             } else {
-                ESP_LOGE("TCP", "Missing parameters for SETY!");
+                ESP_LOGE("TCP", "Missing parameters for %s!", cmd);
             }
             break;
         }
@@ -192,17 +183,36 @@ void process_input(char *input) {
         }
 
         case AA_SYS: {
+            char *val = strtok(NULL, " ");
+            
+            if (val) {
+                bool state = atoi(val);
+                if (!state) {
+                    motor_stop_all();
+                }
 
+                pid_set_aa_sys_state(state);
+            }
             break;
         }
 
         case TARGET: {
+            char *abscissa = strtok(NULL, " ");
+            char *ordinate = strtok(NULL, " ");
 
+            if (abscissa && ordinate) {
+                pid_set_aa_target_pos(atoi(abscissa), atoi(ordinate));
+            }
             break;
         }
 
         case CROSS: {
+            char *abscissa = strtok(NULL, " ");
+            char *ordinate = strtok(NULL, " ");
 
+            if (abscissa && ordinate) {
+                pid_set_aa_crosshair_pos(atoi(abscissa), atoi(ordinate));
+            }
             break;
         }
 

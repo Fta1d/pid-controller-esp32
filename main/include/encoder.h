@@ -7,12 +7,13 @@
 
 esp_err_t encoder_init_dual(void);
 
-esp_err_t encoder_read_y_angle(float *angle);
-esp_err_t encoder_read_x_angle(float *angle);
+esp_err_t encoder_read_y_angle(void);
+esp_err_t encoder_read_x_angle(void);
 
 esp_err_t encoder_calibrate_turret(void);
 
 void encoder_deinit(void);
+void encoder_task_create(void);
 
 esp_err_t encoder_get_status(void);
 

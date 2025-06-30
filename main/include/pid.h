@@ -21,7 +21,7 @@ typedef struct {
     float derivative;
 
     float max_integral;
-} pid_t;
+} pid_controller_t;
 
 typedef struct {
     bool auto_aim_active;
@@ -32,13 +32,15 @@ typedef struct {
     float precision_threshold;
 } auto_aim_system_t;
 
-float pid_calculate(pid_t *pid_controller, float error, float dt);
+float pid_calculate(pid_controller_t *pid_controller, float error, float dt);
 void pid_task_create(void);
 
 void pid_set_kp(float kp);
 void pid_set_ki(float ki);
 void pid_set_kd(float kd);
 
-extern auto_aim_system_t aa_system;
+void pid_set_aa_sys_state(bool state);
+void pid_set_aa_target_pos(uint16_t x, uint16_t y);
+void pid_set_aa_crosshair_pos(uint16_t x, uint16_t y);
 
 #endif // PID_H
