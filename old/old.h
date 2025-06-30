@@ -69,7 +69,7 @@
 #define MAX_Y_ANGLE                 255.0
 #define MIN_Y_ANGLE                 210.0
 
-#define MS_TO_US(ms) ((ms) * 1000)
+#define MS_TO_US(ms)                ((ms) * 1000)
 
 #define MIN_SHOOT_TIME              10
 #define MAX_SHOOT_TIME              100
@@ -97,10 +97,10 @@ typedef struct {
 } controls_t;
 
 typedef struct {
-    uint16_t x_speed;      
-    uint16_t y_speed;
-    uint16_t x_speed_saved;
-    uint16_t y_speed_saved;   
+    float x_speed;      
+    float y_speed;
+    float x_speed_saved;
+    float y_speed_saved;   
     bool x_direction;    
     bool y_direction;
     bool x_dir_saved;
