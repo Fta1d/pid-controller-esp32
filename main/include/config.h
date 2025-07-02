@@ -64,12 +64,12 @@
 #define MIN_SHOOT_TIME          10
 #define MAX_SHOOT_TIME          100
 #define DEF_SHOOT_TIME          50
-#define ACCEL_TIME_MS           100
 
 #define MOTOR_UPDATE_EVENT_X    (1 << 0)
 #define MOTOR_UPDATE_EVENT_Y    (1 << 1)
 #define MOTOR_STOP_EVENT        (1 << 2)
 #define MOTOR_SHOOT_EVENT       (1 << 3)
+#define TRIGGER_RESTORE_EVENT   (1 << 4)
 
 // === GLOBAL VARIABLES ===
 extern uint16_t DUTY;
@@ -82,8 +82,12 @@ typedef enum {
     MOTOR_STOPPED,
     MOTOR_FORWARD,
     MOTOR_BACKWARD,
-    MOTOR_BRAKING
 } motor_state_t;
+
+typedef enum {
+    NOTIFY_TRIGGER_SHOOT = 1,
+    NOTIFY_TRIGGER_RESTORE_MOTORS = 2
+} trigger_notify_t;
 
 // === STRUCTS ===
 typedef struct {
@@ -93,10 +97,10 @@ typedef struct {
 } motor_channels_t;
 
 typedef struct {
-    float duty;
-    float duty_saved;
-
     float angle;
+
+    uint16_t duty;
+    uint16_t duty_saved;
 
     bool dir;
     bool dir_saved;

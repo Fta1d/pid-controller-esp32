@@ -93,6 +93,7 @@ cmd_id_t tcp_parse_command(char *cmd) {
             if (cmd[2] == 'O') return STOP;
             if (cmd[3] == 'X') return SETX;
             if (cmd[3] == 'Y') return SETY;
+            if (cmd[0] == 'S' && cmd[3] == ' ') return SET;
             break;
 
         case 'P':
@@ -170,6 +171,25 @@ void process_input(char *input) {
             break;
         }
 
+        case SET: {
+            char *var = strtok(NULL, " ");
+            char *val = strtok(NULL, " ");
+
+            if (var[1] == 'P') {
+                pid_set_kp(atoff(val));
+            } 
+            else if (var[1] == 'I') {
+                pid_set_ki(atoff(val));
+            }
+            else if (var[1] == 'D') {
+                pid_set_kd(atoff(val));
+            }
+            else if (var[3] == 'F') {
+                pid_set_aa_sys_freq_ms(atoi(val));
+            }
+            break;
+        }
+
         case SHOOT: {
             xEventGroupSetBits(motor_control_event_group, MOTOR_SHOOT_EVENT);
             break;
@@ -188,7 +208,7 @@ void process_input(char *input) {
             if (val) {
                 bool state = atoi(val);
                 if (!state) {
-                    motor_stop_all();
+                    xEventGroupSetBits(motor_control_event_group, MOTOR_STOP_EVENT);
                 }
 
                 pid_set_aa_sys_state(state);

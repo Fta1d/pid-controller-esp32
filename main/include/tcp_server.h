@@ -19,6 +19,7 @@ typedef enum {
     TARGET,
     CROSS,
     AA_SYS,
+    SET,
     ERR
 } cmd_id_t;
 

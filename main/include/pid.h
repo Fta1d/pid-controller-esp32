@@ -28,7 +28,7 @@ typedef struct {
     bool target_reached;
     uint16_t crosshair_x, crosshair_y;
     uint16_t target_x, target_y;
-    const TickType_t work_freq;
+    TickType_t work_freq;
     float precision_threshold;
 } auto_aim_system_t;
 
@@ -42,5 +42,6 @@ void pid_set_kd(float kd);
 void pid_set_aa_sys_state(bool state);
 void pid_set_aa_target_pos(uint16_t x, uint16_t y);
 void pid_set_aa_crosshair_pos(uint16_t x, uint16_t y);
+void pid_set_aa_sys_freq_ms(uint16_t ms);
 
 #endif // PID_H

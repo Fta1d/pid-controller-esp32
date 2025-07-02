@@ -8,7 +8,6 @@
 static const char *TAG = "TRIGGER";
 static volatile uint32_t last_interrupt_time = 0;
 static const uint32_t DEBOUNCE_TIME_MS = 50;
-static volatile bool shoot_requested = false;
 static TaskHandle_t motor_control_task_handle = NULL;
 
 void IRAM_ATTR trigger_interrupt_handler(void *arg) {
@@ -19,12 +18,9 @@ void IRAM_ATTR trigger_interrupt_handler(void *arg) {
     }
     
     last_interrupt_time = current_time;
-    shoot_requested = true;
     
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    if (motor_control_task_handle != NULL) {
-        vTaskNotifyGiveFromISR(motor_control_task_handle, &xHigherPriorityTaskWoken);
-    }
+    xEventGroupSetBitsFromISR(motor_control_event_group, MOTOR_SHOOT_EVENT, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 }
 
@@ -33,9 +29,7 @@ bool IRAM_ATTR trigger_timer_callback(gptimer_handle_t timer, const gptimer_alar
     gptimer_stop(timer);
 
     BaseType_t xHigherPriorityTaskWoken = pdFALSE;
-    if (motor_control_task_handle != NULL) {
-        vTaskNotifyGiveFromISR(motor_control_task_handle, &xHigherPriorityTaskWoken);
-    }
+    xEventGroupSetBitsFromISR(motor_control_event_group, TRIGGER_RESTORE_EVENT, &xHigherPriorityTaskWoken);
     portYIELD_FROM_ISR(xHigherPriorityTaskWoken);
 
     return false; 
@@ -125,14 +119,6 @@ void trigger_shoot(void) {
     gptimer_start(shot_timer);
     
     ESP_LOGI(TAG, "Shoot sequence initiated, timer started");
-}
-
-bool trigger_is_shoot_requested(void) {
-    if (shoot_requested) {
-        shoot_requested = false;
-        return true;
-    }
-    return false;
 }
 
 void trigger_set_motor_task_handle(TaskHandle_t handle) {
