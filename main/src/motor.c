@@ -175,16 +175,16 @@ void motor_restore_states(void) {
 }
 
 bool motor_is_movement_allowed(char motor, bool dir, float angle) {
-    // if (motor == 'X') {
-    //     if (dir == 0 && angle >= 0) {
-    //         ESP_LOGI(TAG, "X motor at max limit (%.2f), cannot move forward", angle);
-    //         return false;
-    //     }
-    //     if (dir == 1 && angle <= 0) {
-    //         ESP_LOGI(TAG, "X motor at min limit (%.2f), cannot move backward", angle);
-    //         return false;
-    //     }
-    // } else 
+    if (motor == 'X') {
+        if (dir == 0 && angle >= 0) {
+            ESP_LOGI(TAG, "X motor at max limit (%.2f), cannot move forward", angle);
+            return false;
+        }
+        if (dir == 1 && angle <= 0) {
+            ESP_LOGI(TAG, "X motor at min limit (%.2f), cannot move backward", angle);
+            return false;
+        }
+    } else 
     if (motor == 'Y') {
         if (dir == 0 && angle >= MAX_Y_ANGLE) {
             ESP_LOGI(TAG, "Y motor at max limit (%.2f), cannot move forward", angle);
@@ -220,10 +220,13 @@ void motor_control_task(void *pvParameters) {
         );
         
         if (events & MOTOR_UPDATE_EVENT_X) {
-            // if (!motor_is_movement_allowed('X', analog_state.x_direction, 0)) {
-            //     printf("X motor movement blocked by limit\n");
-            //     motor_x.current_freq = 0; 
-            //     continue;
+            // if (!motor_is_movement_allowed('X', x_motor.dir, x_motor.angle)) {
+            //     ESP_LOGW(TAG, "X motor movement blockded by limit");
+            //     x_motor.duty = 0;
+            // } else {
+            //     ESP_LOGI(TAG, "Updating motor X: freq=%d, dir=%d",
+            //         (int)x_motor.duty, (int)x_motor.dir);
+            //     motor_set_speed_analog(&motor_x_channels, x_motor.duty, x_motor.dir);
             // }
 
             ESP_LOGI(TAG, "Updating motor X: freq=%d, dir=%d", 

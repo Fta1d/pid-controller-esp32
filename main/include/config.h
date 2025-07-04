@@ -29,7 +29,7 @@
 #define LEDC_FREQUENCY          4000
 #define PWM_CHANNELS_NUM        4
 #define MAX_PWM_DUTY            4095
-#define MIN_PWM_DUTY            2700
+#define MIN_PWM_DUTY            3000
 #define DEFAULT_DUTY            4095
 #define DUTY_STEP               100
 

@@ -180,7 +180,11 @@ esp_err_t encoder_get_status(void) {
 }
 
 static void encoder_task(void *pvParemeters) {
+    TickType_t encoder_task_freq = pdMS_TO_TICKS(20);
+
     while (true) {
+        TickType_t last_wake_time = xTaskGetTickCount();
+
         encoder_read_y_angle();
 
         // if (LOG_STATE) printf("%f || %f\n", motor_x.angle, motor_y.angle);
@@ -201,7 +205,7 @@ static void encoder_task(void *pvParemeters) {
             }
         }
 
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelayUntil(&last_wake_time, encoder_task_freq);
     }
     
 }
