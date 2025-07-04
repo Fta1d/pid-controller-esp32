@@ -76,7 +76,7 @@ esp_err_t uart_send_status(float x_angle, float y_angle) {
     char status_msg[128];
     snprintf(status_msg, sizeof(status_msg), 
              "Status: X=%.2f° Y=%.2f° PWM=%d ShootTime=%dms\r\n", 
-             x_angle, y_angle, DUTY, shoot_time);
+             x_angle, y_angle, -1, shoot_time);
     
     return uart_send_message(status_msg);
 }

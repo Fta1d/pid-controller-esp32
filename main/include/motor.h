@@ -21,5 +21,6 @@ void motor_set_analog_mode(bool active);
 bool motor_get_pass_encoder(void);
 
 void motor_control_task(void *pvParameters);
+void motor_task_create(void);
 
 #endif // MOTOR_H

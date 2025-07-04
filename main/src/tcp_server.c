@@ -15,77 +15,6 @@ static const char *TAG = "TCP";
 static int tcp_server_socket = -1;
 static int client_socket = -1;
 
-// void parse_analog_command(const char *input) {
-//     ESP_LOGI(TAG, "Parsing analog command: '%s'", input);
-    
-//     controls.up_pressed = false;
-//     controls.down_pressed = false;
-//     controls.left_pressed = false;
-//     controls.right_pressed = false;
-    
-//     if (strcmp(input, "SHOOT") == 0) {
-//         trigger_shoot();
-//         return;
-//     }
-    
-//     reset_current_analog_state();
-    
-//     if (strcmp(input, "STOP") == 0) {
-//         return;
-//     }
-
-//     if (strncmp(input, "SET", 3) == 0) {
-//         const char *ptr = input + 3;
-
-//         char axis = *ptr;
-//         if (axis != 'X' && axis != 'Y') {
-//             ESP_LOGW(TAG, "Invalid axis: %c", axis);
-//             return;
-//         }
-//         ptr++; 
-
-//         while (*ptr == ' ') ptr++;
-
-//         float normalized_freq = 0.0f;
-//         char *endptr;
-//         normalized_freq = strtof(ptr, &endptr);
-        
-//         if (endptr == ptr) {
-//             ESP_LOGW(TAG, "Invalid frequency value");
-//             return;
-//         }
-
-//         if (normalized_freq < 0.0f || normalized_freq > 1.0f) {
-//             ESP_LOGW(TAG, "Frequency out of range: %.3f", normalized_freq);
-//             return;
-//         }
-        
-//         ptr = endptr;
-
-//         while (*ptr == ' ') ptr++;
-
-//         int direction = atoi(ptr);
-//         if (direction != 0 && direction != 1) {
-//             ESP_LOGW(TAG, "Invalid direction: %d", direction);
-//             return;
-//         }
-
-//         if (axis == 'X') {
-//             analog_state.x_active = (normalized_freq > 0.0f); 
-//             analog_state.x_speed = normalized_freq; 
-//             analog_state.x_direction = (direction == 1);
-//             ESP_LOGI(TAG, "X axis: speed=%.3f, direction=%d", normalized_freq, direction);
-//         } else if (axis == 'Y') {
-//             analog_state.y_active = (normalized_freq > 0.0f); 
-//             analog_state.y_speed = normalized_freq; 
-//             analog_state.y_direction = (direction == 1);
-//             ESP_LOGI(TAG, "Y axis: speed=%.3f, direction=%d", normalized_freq, direction);
-//         }
-        
-//         return;
-//     }
-// }
-
 cmd_id_t tcp_parse_command(char *cmd) {
     switch (cmd[0]) {
         case 'S':
@@ -344,4 +273,8 @@ void tcp_server_task(void *pvParameters) {
             vTaskDelay(pdMS_TO_TICKS(1000));
         }
     }
+}
+
+void tcp_server_task_create(void) {
+    xTaskCreate(tcp_server_task, "tcp_server", 4096, NULL, 15, NULL);
 }

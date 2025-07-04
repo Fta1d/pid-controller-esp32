@@ -7,7 +7,6 @@
 #include <stdatomic.h>
 
 static const char *TAG = "MOTOR";
-static TaskHandle_t motor_control_task_handle = NULL;
 static volatile bool pass_encoder = false;
 
 void motor_set_pass_encoder(bool pass) {
@@ -199,16 +198,11 @@ bool motor_is_movement_allowed(char motor, bool dir, float angle) {
 }
 
 void motor_control_task(void *pvParameters) {
-    motor_control_task_handle = xTaskGetCurrentTaskHandle();
     const TickType_t motor_control_freq = pdMS_TO_TICKS(20);
     EventBits_t events;
 
     while (1) {
         TickType_t last_wake_time = xTaskGetTickCount();
-        
-        if (encoder_read_y_angle() == ESP_OK) {
-            // turret_pos.y_angle = y_raw_angle;
-        }
 
         events = xEventGroupWaitBits(
             motor_control_event_group,
@@ -263,4 +257,8 @@ void motor_control_task(void *pvParameters) {
         
         xTaskDelayUntil(&last_wake_time, motor_control_freq);
     }
+}
+
+void motor_task_create(void) {
+    xTaskCreate(motor_control_task, "motor_control", 4096, NULL, 10, NULL);
 }

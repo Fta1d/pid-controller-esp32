@@ -17,6 +17,4 @@ bool trigger_timer_callback(gptimer_handle_t timer,
                            const gptimer_alarm_event_data_t *edata, 
                            void *user_data);
 
-void trigger_set_motor_task_handle(TaskHandle_t handle);
-
 #endif // TRIGGER_H

@@ -6,9 +6,8 @@
 void tcp_server_task(void *pvParameters);
 
 void process_input(char *input);
-void parse_analog_command(const char *input);
 
-void reset_current_analog_state(void);
+void tcp_server_task_create(void);
 
 typedef enum {
     SETX = 0,

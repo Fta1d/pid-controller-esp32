@@ -8,7 +8,6 @@
 static const char *TAG = "TRIGGER";
 static volatile uint32_t last_interrupt_time = 0;
 static const uint32_t DEBOUNCE_TIME_MS = 50;
-static TaskHandle_t motor_control_task_handle = NULL;
 
 void IRAM_ATTR trigger_interrupt_handler(void *arg) {
     uint32_t current_time = xTaskGetTickCountFromISR() * portTICK_PERIOD_MS;
@@ -119,9 +118,4 @@ void trigger_shoot(void) {
     gptimer_start(shot_timer);
     
     ESP_LOGI(TAG, "Shoot sequence initiated, timer started");
-}
-
-void trigger_set_motor_task_handle(TaskHandle_t handle) {
-    motor_control_task_handle = handle;
-    ESP_LOGI(TAG, "Motor control task handle registered");
 }

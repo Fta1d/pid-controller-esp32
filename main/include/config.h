@@ -72,7 +72,6 @@
 #define TRIGGER_RESTORE_EVENT   (1 << 4)
 
 // === GLOBAL VARIABLES ===
-extern uint16_t DUTY;
 extern uint16_t shoot_time;
 extern gptimer_handle_t shot_timer;
 extern EventGroupHandle_t motor_control_event_group;

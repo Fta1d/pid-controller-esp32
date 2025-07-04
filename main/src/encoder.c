@@ -1,7 +1,7 @@
-#include "encoder.h"
-#include "config.h"
 #include "esp_log.h"
 
+#include "encoder.h"
+#include "config.h"
 #include "motor.h"
 
 static const char *TAG = "ENCODER";
