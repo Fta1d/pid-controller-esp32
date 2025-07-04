@@ -10,16 +10,16 @@ void process_input(char *input);
 void tcp_server_task_create(void);
 
 typedef enum {
-    SETX = 0,
-    SETY,
-    STOP,
-    SHOOT,
-    PASS_ENCODER,
-    TARGET,
-    CROSS,
-    AA_SYS,
-    SET,
-    ERR
-} cmd_id_t;
+    TCP_SETX = 0,
+    TCP_SETY,
+    TCP_STOP,
+    TCP_SHOOT,
+    TCP_PASS_ENCODER,
+    TCP_TARGET,
+    TCP_CROSS,
+    TCP_AA_SYS,
+    TCP_SET,
+    TCP_ERR
+} cmd_id_tcp_t;
 
 #endif // TCP_SERVER_H

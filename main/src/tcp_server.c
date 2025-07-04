@@ -15,36 +15,36 @@ static const char *TAG = "TCP";
 static int tcp_server_socket = -1;
 static int client_socket = -1;
 
-cmd_id_t tcp_parse_command(char *cmd) {
+cmd_id_tcp_t tcp_parse_command(char *cmd) {
     switch (cmd[0]) {
         case 'S':
-            if (cmd[1] == 'H') return SHOOT;
-            if (cmd[2] == 'O') return STOP;
-            if (cmd[3] == 'X') return SETX;
-            if (cmd[3] == 'Y') return SETY;
-            if (cmd[0] == 'S' && cmd[3] == ' ') return SET;
+            if (cmd[1] == 'H') return TCP_SHOOT;
+            if (cmd[2] == 'O') return TCP_STOP;
+            if (cmd[3] == 'X') return TCP_SETX;
+            if (cmd[3] == 'Y') return TCP_SETY;
+            if (cmd[0] == 'S' && cmd[3] == ' ') return TCP_SET;
             break;
 
         case 'P':
-            return PASS_ENCODER;
+            return TCP_PASS_ENCODER;
             break;
 
         case 'A':
-            return AA_SYS;
+            return TCP_AA_SYS;
             break;
 
         case 'T':
-            return TARGET;
+            return TCP_TARGET;
             break;
 
         case 'C':
-            return CROSS;
+            return TCP_CROSS;
             break;
         
         default:
             break;
     }
-    return ERR;
+    return TCP_ERR;
 }
 
 void process_input(char *input) {
@@ -58,17 +58,17 @@ void process_input(char *input) {
     memcpy(parsed_input, input, len);
     parsed_input[len] = '\0';
 
-    cmd_id_t cmd_id = tcp_parse_command(parsed_input);
+    cmd_id_tcp_t cmd_id = tcp_parse_command(parsed_input);
 
     char *cmd = strtok(parsed_input, " ");
 
     switch (cmd_id) {
-        case STOP: {
+        case TCP_STOP: {
             xEventGroupSetBits(motor_control_event_group, MOTOR_STOP_EVENT);
             break;
         }
             
-        case SETX: {
+        case TCP_SETX: {
             char *value = strtok(NULL, " ");
             char *dir = strtok(NULL, " ");
             float f_value = atoff(value);
@@ -84,7 +84,7 @@ void process_input(char *input) {
             break;
         }
 
-        case SETY: {
+        case TCP_SETY: {
             char *value = strtok(NULL, " ");
             char *dir = strtok(NULL, " ");
             float f_value = atoff(value);
@@ -100,7 +100,7 @@ void process_input(char *input) {
             break;
         }
 
-        case SET: {
+        case TCP_SET: {
             char *var = strtok(NULL, " ");
             char *val = strtok(NULL, " ");
 
@@ -119,19 +119,19 @@ void process_input(char *input) {
             break;
         }
 
-        case SHOOT: {
+        case TCP_SHOOT: {
             xEventGroupSetBits(motor_control_event_group, MOTOR_SHOOT_EVENT);
             break;
         }
 
-        case PASS_ENCODER: {
+        case TCP_PASS_ENCODER: {
             char *value = strtok(NULL, " ");
 
             motor_set_pass_encoder(atoi(value));
             break;
         }
 
-        case AA_SYS: {
+        case TCP_AA_SYS: {
             char *val = strtok(NULL, " ");
             
             if (val) {
@@ -145,7 +145,7 @@ void process_input(char *input) {
             break;
         }
 
-        case TARGET: {
+        case TCP_TARGET: {
             char *abscissa = strtok(NULL, " ");
             char *ordinate = strtok(NULL, " ");
 
@@ -155,7 +155,7 @@ void process_input(char *input) {
             break;
         }
 
-        case CROSS: {
+        case TCP_CROSS: {
             char *abscissa = strtok(NULL, " ");
             char *ordinate = strtok(NULL, " ");
 
@@ -165,7 +165,7 @@ void process_input(char *input) {
             break;
         }
 
-        case ERR:
+        case TCP_ERR:
         default:
             break;
     }

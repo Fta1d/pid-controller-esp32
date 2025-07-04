@@ -43,8 +43,10 @@
 #define I2C_FREQ_HZ             400000
 
 // === UART CONFIGURATION ===
-#define UART_NUM                UART_NUM_2
+#define UART_NUM                UART_NUM_1
 #define UART_BUFF_SIZE          1024
+#define UART_RX_PIN             GPIO_NUM_16
+#define UART_TX_PIN             GPIO_NUM_17
 
 // === WIFI CONFIGURATION ===
 #define WIFI_AP_SSID            "esp32"

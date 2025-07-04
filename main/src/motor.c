@@ -213,6 +213,16 @@ void motor_control_task(void *pvParameters) {
             0
         );
         
+        if (events & MOTOR_STOP_EVENT) {
+            ESP_LOGI(TAG, "Stopping all motors");
+            motor_stop_all();
+        }
+
+        if (events & MOTOR_SHOOT_EVENT) {
+            ESP_LOGI(TAG, "Executing shoot sequence");
+            trigger_shoot();
+        }
+
         if (events & MOTOR_UPDATE_EVENT_X) {
             // if (!motor_is_movement_allowed('X', x_motor.dir, x_motor.angle)) {
             //     ESP_LOGW(TAG, "X motor movement blockded by limit");
@@ -238,16 +248,6 @@ void motor_control_task(void *pvParameters) {
                    (int)y_motor.duty, (int)y_motor.dir);
                 motor_set_speed_analog(&motor_y_channels, y_motor.duty, y_motor.dir);
             }
-        }
-        
-        if (events & MOTOR_STOP_EVENT) {
-            ESP_LOGI(TAG, "Stopping all motors");
-            motor_stop_all();
-        }
-        
-        if (events & MOTOR_SHOOT_EVENT) {
-            ESP_LOGI(TAG, "Executing shoot sequence");
-            trigger_shoot();
         }
 
         if (events & TRIGGER_RESTORE_EVENT) {
