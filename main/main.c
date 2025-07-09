@@ -50,7 +50,7 @@ void app_main(void) {
     
     ESP_ERROR_CHECK(motor_init_pwm());
     ESP_ERROR_CHECK(encoder_init_dual());
-    // ESP_ERROR_CHECK(uart_init());
+    ESP_ERROR_CHECK(uart_init());
     ESP_ERROR_CHECK(trigger_init());
     ESP_ERROR_CHECK(trigger_init_timer());
 
@@ -61,13 +61,12 @@ void app_main(void) {
 
     motor_control_event_group = xEventGroupCreate();
     
+    uart_task_create();
     tcp_server_task_create();
     motor_task_create();
     pid_task_create();
     encoder_task_create();
 
-    // xTaskCreate(uart_task, "uart_task", 4096, NULL, 2, NULL); 
-    
     ESP_LOGI(TAG, "=== ESP32 Turret Controller Ready ===");
     ESP_LOGI(TAG, "1. Connect to WiFi: %s", WIFI_AP_SSID);
     ESP_LOGI(TAG, "2. Password: %s", WIFI_AP_PASS);

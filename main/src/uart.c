@@ -133,6 +133,9 @@ void uart_process_input(char *input) {
             else if (var[3] == 'F') {
                 pid_set_aa_sys_freq_ms(atoi(val));
             }
+
+            ESP_LOGI(TAG, "%s %s %s", cmd, var, val);
+
             break;
         }
 
@@ -221,7 +224,7 @@ static void uart_task(void *pvParameters) {
                             if (ch == '\n' || ch == '\r') {
                                 if (index > 0) {
                                     data[index] = '\0';
-                                    uart_process_command((char *)data);
+                                    uart_process_input((char *)data);
                                     
                                     index = 0;
                                     memset(data, 0, UART_READ_BUFFER_SIZE);

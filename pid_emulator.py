@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Target Tracking Emulator with WiFi and UART support
-Enhanced version that supports both communication methods
+Enhanced version with improved layout and direct command input
 """
 
 import tkinter as tk
@@ -16,7 +16,7 @@ class TargetEmulator:
     def __init__(self, root):
         self.root = root
         self.root.title("Target Tracking Emulator - WiFi/UART")
-        self.root.geometry("900x750")
+        self.root.geometry("1200x800")
         
         # Connection variables
         self.serial_port = None
@@ -45,163 +45,253 @@ class TargetEmulator:
         self.setup_bindings()
         
     def setup_ui(self):
+        # Main container with left and right panels
+        main_frame = ttk.Frame(self.root)
+        main_frame.pack(fill="both", expand=True, padx=5, pady=5)
+        
+        # Left panel for controls with scrollbar
+        left_panel_container = ttk.Frame(main_frame, width=300)
+        left_panel_container.pack(side="left", fill="y", padx=(0, 5))
+        left_panel_container.pack_propagate(False)
+        
+        # Create canvas and scrollbar for left panel
+        left_canvas = tk.Canvas(left_panel_container, width=280)
+        left_scrollbar = ttk.Scrollbar(left_panel_container, orient="vertical", command=left_canvas.yview)
+        scrollable_left_frame = ttk.Frame(left_canvas)
+        
+        # Configure scrolling
+        scrollable_left_frame.bind(
+            "<Configure>",
+            lambda e: left_canvas.configure(scrollregion=left_canvas.bbox("all"))
+        )
+        
+        left_canvas.create_window((0, 0), window=scrollable_left_frame, anchor="nw")
+        left_canvas.configure(yscrollcommand=left_scrollbar.set)
+        
+        # Pack canvas and scrollbar
+        left_canvas.pack(side="left", fill="both", expand=True)
+        left_scrollbar.pack(side="right", fill="y")
+        
+        # Bind mousewheel to canvas
+        def on_mousewheel(event):
+            left_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+        
+        left_canvas.bind("<MouseWheel>", on_mousewheel)
+        
+        # Use scrollable_left_frame instead of left_panel for all controls
+        left_panel = scrollable_left_frame
+        
+        # Right panel for display
+        right_panel = ttk.Frame(main_frame)
+        right_panel.pack(side="right", fill="both", expand=True)
+        
+        # === LEFT PANEL CONTROLS ===
+        
         # Connection type selection frame
-        conn_type_frame = ttk.LabelFrame(self.root, text="Connection Type", padding=10)
-        conn_type_frame.pack(fill="x", padx=10, pady=5)
+        conn_type_frame = ttk.LabelFrame(left_panel, text="Connection Type", padding=10)
+        conn_type_frame.pack(fill="x", pady=(0, 5))
         
         self.conn_type_var = tk.StringVar(value="uart")
         ttk.Radiobutton(conn_type_frame, text="UART/Serial", variable=self.conn_type_var, 
-                       value="uart", command=self.on_connection_type_change).pack(side="left", padx=10)
+                       value="uart", command=self.on_connection_type_change).pack(anchor="w", padx=5)
         ttk.Radiobutton(conn_type_frame, text="WiFi/TCP", variable=self.conn_type_var, 
-                       value="wifi", command=self.on_connection_type_change).pack(side="left", padx=10)
+                       value="wifi", command=self.on_connection_type_change).pack(anchor="w", padx=5)
         
         # Connection parameters frame
-        conn_frame = ttk.LabelFrame(self.root, text="Connection Parameters", padding=10)
-        conn_frame.pack(fill="x", padx=10, pady=5)
+        conn_frame = ttk.LabelFrame(left_panel, text="Connection Parameters", padding=10)
+        conn_frame.pack(fill="x", pady=(0, 5))
         
         # UART settings
         self.uart_frame = ttk.Frame(conn_frame)
-        self.uart_frame.grid(row=0, column=0, sticky="ew", columnspan=6)
+        self.uart_frame.pack(fill="x", pady=(0, 5))
         
         ttk.Label(self.uart_frame, text="Port:").grid(row=0, column=0, sticky="w")
         self.port_var = tk.StringVar(value="/dev/ttyUSB0")
         self.port_entry = ttk.Entry(self.uart_frame, textvariable=self.port_var, width=15)
-        self.port_entry.grid(row=0, column=1, padx=5)
+        self.port_entry.grid(row=0, column=1, padx=(5, 0), sticky="ew")
         
-        ttk.Label(self.uart_frame, text="Baud:").grid(row=0, column=2, sticky="w", padx=(20,0))
+        ttk.Label(self.uart_frame, text="Baud:").grid(row=1, column=0, sticky="w")
         self.baud_var = tk.StringVar(value="115200")
-        self.baud_entry = ttk.Entry(self.uart_frame, textvariable=self.baud_var, width=10)
-        self.baud_entry.grid(row=0, column=3, padx=5)
+        self.baud_entry = ttk.Entry(self.uart_frame, textvariable=self.baud_var, width=15)
+        self.baud_entry.grid(row=1, column=1, padx=(5, 0), sticky="ew")
+        
+        self.uart_frame.columnconfigure(1, weight=1)
         
         # WiFi settings
         self.wifi_frame = ttk.Frame(conn_frame)
-        self.wifi_frame.grid(row=1, column=0, sticky="ew", columnspan=6)
+        self.wifi_frame.pack(fill="x", pady=(0, 5))
         
         ttk.Label(self.wifi_frame, text="IP:").grid(row=0, column=0, sticky="w")
         self.ip_var = tk.StringVar(value="192.168.4.1")
         self.ip_entry = ttk.Entry(self.wifi_frame, textvariable=self.ip_var, width=15)
-        self.ip_entry.grid(row=0, column=1, padx=5)
+        self.ip_entry.grid(row=0, column=1, padx=(5, 0), sticky="ew")
         
-        ttk.Label(self.wifi_frame, text="Port:").grid(row=0, column=2, sticky="w", padx=(20,0))
+        ttk.Label(self.wifi_frame, text="Port:").grid(row=1, column=0, sticky="w")
         self.tcp_port_var = tk.StringVar(value="8080")
-        self.tcp_port_entry = ttk.Entry(self.wifi_frame, textvariable=self.tcp_port_var, width=10)
-        self.tcp_port_entry.grid(row=0, column=3, padx=5)
+        self.tcp_port_entry = ttk.Entry(self.wifi_frame, textvariable=self.tcp_port_var, width=15)
+        self.tcp_port_entry.grid(row=1, column=1, padx=(5, 0), sticky="ew")
         
-        # Connection controls
-        self.connect_btn = ttk.Button(conn_frame, text="Connect", command=self.toggle_connection)
-        self.connect_btn.grid(row=2, column=0, padx=10, pady=10, sticky="w")
-        
-        self.status_label = ttk.Label(conn_frame, text="Disconnected", foreground="red")
-        self.status_label.grid(row=2, column=1, padx=10, pady=10, sticky="w")
+        self.wifi_frame.columnconfigure(1, weight=1)
         
         # Hide WiFi frame initially
-        self.wifi_frame.grid_remove()
+        self.wifi_frame.pack_forget()
+        
+        # Connection controls
+        conn_controls = ttk.Frame(conn_frame)
+        conn_controls.pack(fill="x", pady=(5, 0))
+        
+        self.connect_btn = ttk.Button(conn_controls, text="Connect", command=self.toggle_connection)
+        self.connect_btn.pack(side="left", padx=(0, 10))
+        
+        self.status_label = ttk.Label(conn_controls, text="Disconnected", foreground="red")
+        self.status_label.pack(side="left")
         
         # Control frame
-        control_frame = ttk.LabelFrame(self.root, text="Target Control", padding=10)
-        control_frame.pack(fill="x", padx=10, pady=5)
+        control_frame = ttk.LabelFrame(left_panel, text="Target Control", padding=10)
+        control_frame.pack(fill="x", pady=(0, 5))
         
         # Manual coordinates input
         coord_input_frame = ttk.Frame(control_frame)
-        coord_input_frame.grid(row=0, column=0, columnspan=3, sticky="ew", pady=(0,10))
+        coord_input_frame.pack(fill="x", pady=(0, 10))
         
-        ttk.Label(coord_input_frame, text="Target X:").grid(row=0, column=0, sticky="w")
-        self.target_x_entry = ttk.Entry(coord_input_frame, width=8)
-        self.target_x_entry.grid(row=0, column=1, padx=5)
+        # Target coordinates
+        target_frame = ttk.Frame(coord_input_frame)
+        target_frame.pack(fill="x", pady=(0, 5))
+        
+        ttk.Label(target_frame, text="Target X:").grid(row=0, column=0, sticky="w")
+        self.target_x_entry = ttk.Entry(target_frame, width=8)
+        self.target_x_entry.grid(row=0, column=1, padx=(5, 10))
         self.target_x_entry.insert(0, "320")
         
-        ttk.Label(coord_input_frame, text="Y:").grid(row=0, column=2, sticky="w", padx=(20,0))
-        self.target_y_entry = ttk.Entry(coord_input_frame, width=8)
-        self.target_y_entry.grid(row=0, column=3, padx=5)
+        ttk.Label(target_frame, text="Y:").grid(row=0, column=2, sticky="w")
+        self.target_y_entry = ttk.Entry(target_frame, width=8)
+        self.target_y_entry.grid(row=0, column=3, padx=(5, 0))
         self.target_y_entry.insert(0, "180")
         
-        ttk.Button(coord_input_frame, text="Set Target", command=self.set_target_from_entry).grid(row=0, column=4, padx=10)
+        ttk.Button(target_frame, text="Set Target", command=self.set_target_from_entry).grid(row=1, column=0, columnspan=4, pady=(5, 0), sticky="ew")
         
-        ttk.Label(coord_input_frame, text="Cross X:").grid(row=1, column=0, sticky="w")
-        self.cross_x_entry = ttk.Entry(coord_input_frame, width=8)
-        self.cross_x_entry.grid(row=1, column=1, padx=5)
+        # Crosshair coordinates
+        cross_frame = ttk.Frame(coord_input_frame)
+        cross_frame.pack(fill="x", pady=(5, 0))
+        
+        ttk.Label(cross_frame, text="Cross X:").grid(row=0, column=0, sticky="w")
+        self.cross_x_entry = ttk.Entry(cross_frame, width=8)
+        self.cross_x_entry.grid(row=0, column=1, padx=(5, 10))
         self.cross_x_entry.insert(0, "320")
         
-        ttk.Label(coord_input_frame, text="Y:").grid(row=1, column=2, sticky="w", padx=(20,0))
-        self.cross_y_entry = ttk.Entry(coord_input_frame, width=8)
-        self.cross_y_entry.grid(row=1, column=3, padx=5)
+        ttk.Label(cross_frame, text="Y:").grid(row=0, column=2, sticky="w")
+        self.cross_y_entry = ttk.Entry(cross_frame, width=8)
+        self.cross_y_entry.grid(row=0, column=3, padx=(5, 0))
         self.cross_y_entry.insert(0, "180")
         
-        ttk.Button(coord_input_frame, text="Set Cross", command=self.set_cross_from_entry).grid(row=1, column=4, padx=10)
+        ttk.Button(cross_frame, text="Set Cross", command=self.set_cross_from_entry).grid(row=1, column=0, columnspan=4, pady=(5, 0), sticky="ew")
         
         # Manual coordinates sliders
-        ttk.Label(control_frame, text="Target X:").grid(row=1, column=0, sticky="w")
+        slider_frame = ttk.Frame(control_frame)
+        slider_frame.pack(fill="x", pady=(10, 0))
+        
+        ttk.Label(slider_frame, text="Target X:").pack(anchor="w")
         self.target_x_var = tk.IntVar(value=320)
-        self.target_x_scale = ttk.Scale(control_frame, from_=0, to=640, 
+        self.target_x_scale = ttk.Scale(slider_frame, from_=0, to=640, 
                                        variable=self.target_x_var, orient="horizontal",
-                                       length=200, command=self.update_target_manual)
-        self.target_x_scale.grid(row=1, column=1, padx=5)
+                                       command=self.update_target_manual)
+        self.target_x_scale.pack(fill="x", pady=(0, 5))
         
-        self.target_x_label = ttk.Label(control_frame, text="320")
-        self.target_x_label.grid(row=1, column=2, padx=5)
+        self.target_x_label = ttk.Label(slider_frame, text="320")
+        self.target_x_label.pack(anchor="center")
         
-        ttk.Label(control_frame, text="Target Y:").grid(row=2, column=0, sticky="w")
+        ttk.Label(slider_frame, text="Target Y:").pack(anchor="w", pady=(10, 0))
         self.target_y_var = tk.IntVar(value=180)
-        self.target_y_scale = ttk.Scale(control_frame, from_=0, to=360,
+        self.target_y_scale = ttk.Scale(slider_frame, from_=0, to=360,
                                        variable=self.target_y_var, orient="horizontal", 
-                                       length=200, command=self.update_target_manual)
-        self.target_y_scale.grid(row=2, column=1, padx=5)
+                                       command=self.update_target_manual)
+        self.target_y_scale.pack(fill="x", pady=(0, 5))
         
-        self.target_y_label = ttk.Label(control_frame, text="180")
-        self.target_y_label.grid(row=2, column=2, padx=5)
+        self.target_y_label = ttk.Label(slider_frame, text="180")
+        self.target_y_label.pack(anchor="center")
         
         # Auto movement controls
-        auto_frame = ttk.LabelFrame(control_frame, text="Auto Movement", padding=5)
-        auto_frame.grid(row=3, column=0, columnspan=3, sticky="ew", pady=10)
+        auto_frame = ttk.LabelFrame(left_panel, text="Auto Movement", padding=10)
+        auto_frame.pack(fill="x", pady=(0, 5))
         
         self.auto_move_var = tk.BooleanVar()
         self.auto_move_check = ttk.Checkbutton(auto_frame, text="Auto Move", 
                                               variable=self.auto_move_var,
                                               command=self.toggle_auto_move)
-        self.auto_move_check.grid(row=0, column=0, sticky="w")
+        self.auto_move_check.pack(anchor="w")
         
-        ttk.Label(auto_frame, text="Pattern:").grid(row=0, column=1, padx=(20,5))
+        pattern_frame = ttk.Frame(auto_frame)
+        pattern_frame.pack(fill="x", pady=(5, 0))
+        
+        ttk.Label(pattern_frame, text="Pattern:").pack(side="left")
         self.pattern_var = tk.StringVar(value="circle")
-        pattern_combo = ttk.Combobox(auto_frame, textvariable=self.pattern_var,
+        pattern_combo = ttk.Combobox(pattern_frame, textvariable=self.pattern_var,
                                    values=["circle", "square", "figure8"], width=10)
-        pattern_combo.grid(row=0, column=2, padx=5)
+        pattern_combo.pack(side="right")
         
-        ttk.Label(auto_frame, text="Speed:").grid(row=0, column=3, padx=(20,5))
+        speed_frame = ttk.Frame(auto_frame)
+        speed_frame.pack(fill="x", pady=(5, 0))
+        
+        ttk.Label(speed_frame, text="Speed:").pack(side="left")
         self.speed_var = tk.DoubleVar(value=1.0)
-        speed_scale = ttk.Scale(auto_frame, from_=0.1, to=5.0,
-                               variable=self.speed_var, orient="horizontal", length=100)
-        speed_scale.grid(row=0, column=4, padx=5)
+        speed_scale = ttk.Scale(speed_frame, from_=0.1, to=5.0,
+                               variable=self.speed_var, orient="horizontal")
+        speed_scale.pack(side="right", fill="x", expand=True, padx=(10, 0))
         
         # Auto aim control
-        aim_frame = ttk.LabelFrame(self.root, text="Auto Aim Control", padding=10)
-        aim_frame.pack(fill="x", padx=10, pady=5)
+        aim_frame = ttk.LabelFrame(left_panel, text="Auto Aim Control", padding=10)
+        aim_frame.pack(fill="x", pady=(0, 5))
         
         self.start_btn = ttk.Button(aim_frame, text="Start Auto Aim (Space)", 
                                    command=self.start_auto_aim, state="disabled")
-        self.start_btn.pack(side="left", padx=5)
+        self.start_btn.pack(fill="x", pady=(0, 5))
         
         self.stop_btn = ttk.Button(aim_frame, text="Stop Auto Aim (Esc)", 
                                   command=self.stop_auto_aim, state="disabled")
-        self.stop_btn.pack(side="left", padx=5)
+        self.stop_btn.pack(fill="x", pady=(0, 5))
         
         self.aim_status_label = ttk.Label(aim_frame, text="Auto Aim: OFF", foreground="red")
-        self.aim_status_label.pack(side="left", padx=20)
+        self.aim_status_label.pack()
+        
+        # Direct command input
+        cmd_frame = ttk.LabelFrame(left_panel, text="Direct Command", padding=10)
+        cmd_frame.pack(fill="x", pady=(0, 5))
+        
+        cmd_input_frame = ttk.Frame(cmd_frame)
+        cmd_input_frame.pack(fill="x", pady=(0, 5))
+        
+        ttk.Label(cmd_input_frame, text="Command:").pack(anchor="w")
+        self.command_var = tk.StringVar()
+        self.command_entry = ttk.Entry(cmd_input_frame, textvariable=self.command_var)
+        self.command_entry.pack(fill="x", pady=(2, 5))
+        self.command_entry.bind("<Return>", self.send_direct_command)
+        
+        ttk.Button(cmd_input_frame, text="Send Command", command=self.send_direct_command).pack(fill="x")
+        
+        # === RIGHT PANEL DISPLAY ===
         
         # Visual display
-        display_frame = ttk.LabelFrame(self.root, text="Camera View (640x360)", padding=10)
-        display_frame.pack(fill="both", expand=True, padx=10, pady=5)
+        display_frame = ttk.LabelFrame(right_panel, text="Camera View (640x360)", padding=10)
+        display_frame.pack(fill="both", expand=True, pady=(0, 5))
         
-        self.canvas = tk.Canvas(display_frame, width=640, height=360, bg="black")
-        self.canvas.pack()
+        # Canvas container to center the canvas
+        canvas_container = ttk.Frame(display_frame)
+        canvas_container.pack(fill="both", expand=True)
+        
+        self.canvas = tk.Canvas(canvas_container, width=640, height=360, bg="black")
+        self.canvas.pack(expand=True)
         
         # Info display
-        info_frame = ttk.LabelFrame(self.root, text="Connection Info", padding=5)
-        info_frame.pack(fill="x", padx=10, pady=5)
+        info_frame = ttk.LabelFrame(right_panel, text="Connection Log", padding=5)
+        info_frame.pack(fill="x")
         
-        self.info_text = tk.Text(info_frame, height=4, width=80)
+        info_container = ttk.Frame(info_frame)
+        info_container.pack(fill="both", expand=True)
+        
+        self.info_text = tk.Text(info_container, height=8, width=60)
         self.info_text.pack(side="left", fill="both", expand=True)
         
-        scrollbar = ttk.Scrollbar(info_frame, orient="vertical", command=self.info_text.yview)
+        scrollbar = ttk.Scrollbar(info_container, orient="vertical", command=self.info_text.yview)
         scrollbar.pack(side="right", fill="y")
         self.info_text.config(yscrollcommand=scrollbar.set)
         
@@ -218,11 +308,11 @@ class TargetEmulator:
         self.connection_type = self.conn_type_var.get()
         
         if self.connection_type == "uart":
-            self.uart_frame.grid()
-            self.wifi_frame.grid_remove()
+            self.uart_frame.pack(fill="x", pady=(0, 5))
+            self.wifi_frame.pack_forget()
         else:
-            self.wifi_frame.grid()
-            self.uart_frame.grid_remove()
+            self.wifi_frame.pack(fill="x", pady=(0, 5))
+            self.uart_frame.pack_forget()
             
         # Disconnect if connected
         if self.is_connected:
@@ -312,6 +402,16 @@ class TargetEmulator:
         except Exception as e:
             self.log(f"Send error ({self.connection_type}): {e}")
             self.is_connected = False
+            
+    def send_direct_command(self, event=None):
+        """Send command directly from input field"""
+        command = self.command_var.get().strip()
+        if command:
+            if self.is_connected:
+                self.send_command(command)
+                self.command_var.set("")  # Clear input after sending
+            else:
+                self.log("Not connected! Cannot send command.")
             
     def on_key_press(self, event):
         if event.keysym == "space":

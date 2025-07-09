@@ -116,6 +116,8 @@ void process_input(char *input) {
             else if (var[3] == 'F') {
                 pid_set_aa_sys_freq_ms(atoi(val));
             }
+
+            ESP_LOGI(TAG, "%s %s %s", cmd, var, val);
             break;
         }
 

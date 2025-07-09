@@ -4,7 +4,7 @@
 static const char *TAG = "PID";
 
 pid_controller_t pid_x = {
-    .kp = 20.0,
+    .kp = 30.0,
     .ki = 0.0,
     .kd = 0.0,
     .integral = 0.0,
@@ -16,7 +16,7 @@ pid_controller_t pid_x = {
 };
 
 pid_controller_t pid_y = {
-    .kp = 20.0,
+    .kp = 30.0,
     .ki = 0.0,
     .kd = 0.0,
     .integral = 0.0,
@@ -117,7 +117,7 @@ void auto_aim_target(void) {
     // ESP_LOGI(TAG, "ERROR X: %d | ERROR Y: %d", error_x, error_y);
 
     if (abs(error_x) < aa_system.precision_threshold && abs(error_y) < aa_system.precision_threshold) {
-        if (aa_system.target_reached) return;
+        if (aa_system.target_reached) return;   // Preventing multiple STOP event triggering
         
         xEventGroupSetBits(motor_control_event_group, MOTOR_STOP_EVENT);
         aa_system.target_reached = true;
