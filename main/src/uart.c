@@ -130,7 +130,10 @@ void uart_process_input(char *input) {
             else if (var[1] == 'D') {
                 pid_set_kd(atoff(val));
             }
-            else if (var[3] == 'F') {
+            else if (strcmp(var, "PREC") == 0) {
+                pid_set_aa_precision_threshold(atoff(val));
+            } 
+            else if (strcmp(var, "FREQ") == 0) {
                 pid_set_aa_sys_freq_ms(atoi(val));
             }
 

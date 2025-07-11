@@ -9,6 +9,7 @@ idf_component_register(
         "src/uart.c"
         "src/pid.c"
         "src/utils.c"
+        "src/backlash_compensator.c"
     INCLUDE_DIRS 
         "include"
     REQUIRES 

@@ -13,7 +13,6 @@ void motor_set_speed_analog(motor_channels_t *motor, float speed, bool forward);
 
 uint16_t motor_speed_to_duty(float speed);
 
-void motor_restore_states_gamepad(void);
 void motor_restore_states(void);
 
 void motor_set_pass_encoder(bool pass);

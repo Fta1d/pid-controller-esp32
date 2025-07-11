@@ -414,9 +414,7 @@ class TargetEmulator:
                 self.log("Not connected! Cannot send command.")
             
     def on_key_press(self, event):
-        if event.keysym == "space":
-            self.start_auto_aim()
-        elif event.keysym == "Escape":
+        if event.keysym == "Escape":
             self.stop_auto_aim()
         elif event.keysym in ["Up", "Down", "Left", "Right"]:
             self.move_target_with_keys(event.keysym)

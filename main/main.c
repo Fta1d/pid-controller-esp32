@@ -11,6 +11,8 @@
 #include "encoder.h"
 #include "uart.h"
 #include "pid.h"
+#include "backlash_compensator.h"
+#include "utils.h"
 
 uint16_t shoot_time = DEF_SHOOT_TIME;
 gptimer_handle_t shot_timer = NULL;
@@ -53,7 +55,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(uart_init());
     ESP_ERROR_CHECK(trigger_init());
     ESP_ERROR_CHECK(trigger_init_timer());
-
+    ESP_ERROR_CHECK(lsm303_mag_init(Y_ENCODER_I2C_PORT));
     ESP_LOGI(TAG, "Initializing WiFi Access Point...");
     ESP_ERROR_CHECK(wifi_init_ap());
 
@@ -66,10 +68,13 @@ void app_main(void) {
     motor_task_create();
     pid_task_create();
     encoder_task_create();
+    backlash_compensator_task_create();
 
     ESP_LOGI(TAG, "=== ESP32 Turret Controller Ready ===");
     ESP_LOGI(TAG, "1. Connect to WiFi: %s", WIFI_AP_SSID);
     ESP_LOGI(TAG, "2. Password: %s", WIFI_AP_PASS);
     ESP_LOGI(TAG, "3. Run Python script with IP: 192.168.4.1");
     ESP_LOGI(TAG, "4. Port: %d", TCP_PORT);
+
+    scan_i2c_bus(Y_ENCODER_I2C_PORT);
 }

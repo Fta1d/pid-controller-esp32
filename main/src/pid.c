@@ -71,6 +71,10 @@ void pid_set_aa_sys_state(bool state) {
     aa_system.auto_aim_active = state;
 }
 
+void pid_set_aa_precision_threshold(float thrs) {
+    aa_system.precision_threshold = thrs;
+}
+
 float pid_calculate(pid_controller_t *pid, float error, float dt) {
     float output = 0;
 

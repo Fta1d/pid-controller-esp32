@@ -43,5 +43,6 @@ void pid_set_aa_sys_state(bool state);
 void pid_set_aa_target_pos(uint16_t x, uint16_t y);
 void pid_set_aa_crosshair_pos(uint16_t x, uint16_t y);
 void pid_set_aa_sys_freq_ms(uint16_t ms);
+void pid_set_aa_precision_threshold(float thrs);
 
 #endif // PID_H
