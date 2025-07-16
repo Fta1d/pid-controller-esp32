@@ -1,15 +1,17 @@
-#include "tcp_server.h"
-#include "wifi_ap.h"
-#include "motor.h"
-#include "pid.h"
-#include "trigger.h"
-#include "encoder.h"
 #include "esp_log.h"
 #include "lwip/sockets.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <string.h>
 #include <stdlib.h>
+
+#include "tcp_server.h"
+#include "wifi_ap.h"
+#include "motor.h"
+#include "pid.h"
+#include "trigger.h"
+#include "encoder.h"
+#include "backlash_compensator.h"
 
 static const char *TAG = "TCP";
 static int tcp_server_socket = -1;
@@ -168,6 +170,11 @@ void process_input(char *input) {
             if (abscissa && ordinate) {
                 pid_set_aa_crosshair_pos(atoi(abscissa), atoi(ordinate));
             }
+            break;
+        }
+
+        case TCP_CALIBRATE_BACKLASH: {
+            calculate_backlash();
             break;
         }
 

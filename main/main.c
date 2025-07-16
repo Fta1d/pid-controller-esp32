@@ -12,6 +12,7 @@
 #include "uart.h"
 #include "pid.h"
 #include "backlash_compensator.h"
+#include "accel.h"
 #include "utils.h"
 
 uint16_t shoot_time = DEF_SHOOT_TIME;
@@ -55,7 +56,7 @@ void app_main(void) {
     ESP_ERROR_CHECK(uart_init());
     ESP_ERROR_CHECK(trigger_init());
     ESP_ERROR_CHECK(trigger_init_timer());
-    ESP_ERROR_CHECK(lsm303_mag_init(Y_ENCODER_I2C_PORT));
+    ESP_ERROR_CHECK(lsm303_init());
     ESP_LOGI(TAG, "Initializing WiFi Access Point...");
     ESP_ERROR_CHECK(wifi_init_ap());
 

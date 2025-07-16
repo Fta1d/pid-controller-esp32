@@ -55,7 +55,8 @@ cmd_id_t uart_parse_command(char *cmd) {
             break;
 
         case 'C':
-            return CROSS;
+            if (cmd[1] == 'R') return CROSS;
+            if (cmd[1] == 'A') return CALIBRATE_BACKLASH;
             break;
         
         default:
@@ -185,6 +186,11 @@ void uart_process_input(char *input) {
             if (abscissa && ordinate) {
                 pid_set_aa_crosshair_pos(atoi(abscissa), atoi(ordinate));
             }
+            break;
+        }
+
+        case CALIBRATE_BACKLASH: {
+            calculate_backlash();
             break;
         }
 

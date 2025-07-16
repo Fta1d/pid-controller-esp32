@@ -5,10 +5,7 @@
 #include "stdlib.h"
 #include "math.h"
 
-#include "driver/i2c.h"
 #include "esp_log.h"
-
-#define GYRO_THRESHOLD 0.1
 
 typedef struct {
     float backlash_in_angle;
@@ -16,7 +13,7 @@ typedef struct {
     bool ena;
 } backlash_compensator_t;
 
-esp_err_t lsm303_mag_init(i2c_port_t port);
+void calculate_backlash(/**/);
 void backlash_compensator_task_create();
 
 

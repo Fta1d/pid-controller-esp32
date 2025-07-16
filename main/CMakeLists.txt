@@ -10,6 +10,7 @@ idf_component_register(
         "src/pid.c"
         "src/utils.c"
         "src/backlash_compensator.c"
+        "src/accel.c"
     INCLUDE_DIRS 
         "include"
     REQUIRES 
@@ -17,7 +18,8 @@ idf_component_register(
         nvs_flash 
         esp_wifi 
         esp_netif 
-        esp_event 
+        esp_event
+        esp_timer 
         lwip
         driver
         freertos

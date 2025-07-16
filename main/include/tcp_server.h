@@ -19,6 +19,7 @@ typedef enum {
     TCP_CROSS,
     TCP_AA_SYS,
     TCP_SET,
+    TCP_CALIBRATE_BACKLASH,
     TCP_ERR
 } cmd_id_tcp_t;
 

@@ -186,6 +186,7 @@ static void encoder_task(void *pvParemeters) {
         TickType_t last_wake_time = xTaskGetTickCount();
 
         encoder_read_y_angle();
+        // ESP_LOGI(TAG, "ANGLE Y: %f", y_motor.angle);
 
         // if (LOG_STATE) printf("%f || %f\n", motor_x.angle, motor_y.angle);
     

@@ -4,6 +4,7 @@
 #include "motor.h"
 #include "pid.h"
 #include "trigger.h"
+#include "backlash_compensator.h"
 
 #include "esp_err.h"
 #include "driver/uart.h"
@@ -31,6 +32,7 @@ typedef enum {
     CROSS,
     AA_SYS,
     SET,
+    CALIBRATE_BACKLASH,
     ERR
 } cmd_id_t;
 
