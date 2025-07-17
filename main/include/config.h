@@ -100,8 +100,8 @@ typedef struct {
 typedef struct {
     float angle;
 
-    uint16_t duty;
-    uint16_t duty_saved;
+    uint32_t duty;
+    uint32_t duty_saved;
 
     bool dir;
     bool dir_saved;

@@ -9,7 +9,7 @@ esp_err_t motor_init_pwm(void);
 
 void motor_stop(motor_channels_t *motor);
 void motor_stop_all(void);
-void motor_set_speed_analog(motor_channels_t *motor, float speed, bool forward);
+void motor_set_speed_analog(motor_channels_t *motor, uint32_t speed, bool forward);
 
 uint16_t motor_speed_to_duty(float speed);
 

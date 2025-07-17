@@ -1,20 +1,72 @@
 #include "backlash_compensator.h"
+#include "motor.h"
 #include "accel.h"
 
 #define MOTION_THRESHOLD            200
 
 static const char *TAG = "BACKLASH_COMP";
-static backlash_compensator_t backlash_compensator_handle = {0};
+static backlash_compensator_t backlash_comp_handle = {0};
 
-float read_gyro() {
-    static int calls = 0;
-
-    if (calls++ > 50) {
-        return 1.1;
-    } else {
-        return 10.0;
+void skip_backlash(bool dir, uint32_t target_speed) {
+    if (backlash_comp_handle.backlash_in_ticks == 0) {
+        ESP_LOGE(TAG, "Backlash compensator not calibrated");
+        return;
     }
+    
+    ESP_LOGI(TAG, "Applying backlash compensation");
+    
+    backlash_comp_handle.compensation_in_progress = true;
+
+    // Зберігаємо цільові значення
+    x_motor.duty_saved = target_speed;
+    x_motor.dir_saved = dir;
+
+    // НЕ зупиняємо мотор! Відразу запускаємо на максимальній швидкості
+    motor_set_speed_analog(&motor_x_channels, MAX_PWM_DUTY, dir);
+    
+    ESP_LOGI(TAG, "Compensating at max speed for %d ticks", 
+             (int)backlash_comp_handle.backlash_in_ticks);
+    
+    // Чекаємо компенсацію
+    vTaskDelay(backlash_comp_handle.backlash_in_ticks);
+    
+    // Відновлюємо цільову швидкість
+    motor_set_speed_analog(&motor_x_channels, target_speed, dir);
+    
+    backlash_comp_handle.compensation_in_progress = false;
+    
+    ESP_LOGI(TAG, "Backlash compensation completed");
 }
+
+// void skip_backlash(bool dir, uint32_t target_speed) {
+//     if (backlash_comp_handle.backlash_in_ticks == 0) {
+//         ESP_LOGE(TAG, "Backlash compensator not calibrated");
+//         return;
+//     }
+    
+//     ESP_LOGI(TAG, "Applying backlash compensation");
+
+//     x_motor.duty_saved = target_speed;
+//     x_motor.dir_saved = dir;
+
+//     xEventGroupSetBits(motor_control_event_group, MOTOR_STOP_EVENT);
+
+//     x_motor.duty = MAX_PWM_DUTY;
+//     x_motor.dir = dir;
+//     xEventGroupSetBits(motor_control_event_group, MOTOR_UPDATE_EVENT_X);
+//     vTaskDelay(pdMS_TO_TICKS(5));
+//     ESP_LOGI(TAG, "Curr duty %lu %lu", ledc_get_duty(LEDC_MODE, X_IN1_LEDC_CHANNEL), ledc_get_duty(LEDC_MODE, X_IN2_LEDC_CHANNEL));
+    
+//     vTaskDelay(backlash_comp_handle.backlash_in_ticks);
+    
+//     // xEventGroupSetBits(motor_control_event_group, MOTOR_STOP_EVENT);
+//     // vTaskDelay(pdMS_TO_TICKS(5));
+
+//     motor_restore_states();
+    
+//     ESP_LOGI(TAG, "Backlash compensation completed in %d ticks", 
+//              (int)backlash_comp_handle.backlash_in_ticks);
+// }
 
 void calculate_backlash(/**/) {
     // if (backlash_handle == NULL) {
@@ -58,8 +110,8 @@ void calculate_backlash(/**/) {
 
     end_ticks = xTaskGetTickCount();
 
-    backlash_compensator_handle.backlash_in_ticks = end_ticks - start_ticks;
-    ESP_LOGW(TAG, "Backlash in tiks: %d", (int)backlash_compensator_handle.backlash_in_ticks);
+    backlash_comp_handle.backlash_in_ticks = end_ticks - start_ticks;
+    ESP_LOGW(TAG, "Backlash in tiks: %d", (int)backlash_comp_handle.backlash_in_ticks);
 }
 
 void backlash_compensator_task(void *pvParameters) {
@@ -105,4 +157,16 @@ void backlash_compensator_deinit(backlash_compensator_t *handle) {
     if (handle != NULL) {
         free(handle);
     }
+}
+
+void backlash_comp_enable(bool val) {
+    backlash_comp_handle.ena = val;
+}
+
+bool backlash_compensator_is_enabled() {
+    return backlash_comp_handle.ena;
+}
+
+bool backlash_compensation_in_progress(void) {
+    return backlash_comp_handle.compensation_in_progress;
 }

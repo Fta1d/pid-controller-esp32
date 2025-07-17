@@ -1,10 +1,12 @@
-#include "motor.h"
-#include "encoder.h"
-#include "trigger.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdatomic.h>
+
+#include "motor.h"
+#include "encoder.h"
+#include "trigger.h"
+#include "backlash_compensator.h"
 
 static const char *TAG = "MOTOR";
 static volatile bool pass_encoder = false;
@@ -102,11 +104,12 @@ uint16_t motor_speed_to_duty(float speed) {
     return duty;
 }
 
-void motor_set_speed_analog(motor_channels_t *motor, float speed, bool forward) {
-    // uint16_t duty = motor_speed_to_duty(speed);
-    
-    static float last_x_speed = 0.0;
-    static float last_y_speed = 0.0;
+void motor_set_speed_analog(motor_channels_t *motor, uint32_t speed, bool forward) {
+    static uint32_t last_x_speed = 0;
+    static uint32_t last_y_speed = 0;
+
+    static bool last_x_direction = true;
+    static bool first_x_move = true;
     
     if (motor == &motor_x_channels) {
         motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
@@ -116,6 +119,30 @@ void motor_set_speed_analog(motor_channels_t *motor, float speed, bool forward) 
             ESP_LOGW(TAG, "X param did not change, skipping!");
             return;
         }
+
+        if (speed > 0) {
+            bool direction_changed = !first_x_move && last_x_direction != forward;
+            
+            if (direction_changed && backlash_compensator_is_enabled()) {
+                ESP_LOGI(TAG, "Direction changed: %s -> %s, applying backlash compensation",
+                        last_x_direction ? "FORWARD" : "BACKWARD",
+                        forward ? "FORWARD" : "BACKWARD");
+                
+                skip_backlash(forward, speed);
+                last_x_speed = 0;
+                
+                x_state = desired_state;
+                // last_x_speed = speed;
+                last_x_direction = forward;
+                first_x_move = false;
+                return;  
+            }   
+            if (!first_x_move || !direction_changed) {
+                last_x_direction = forward;
+                first_x_move = false;
+            }
+        }
+
         x_state = desired_state;
         last_x_speed = speed;
         
@@ -212,6 +239,11 @@ void motor_control_task(void *pvParameters) {
             pdFALSE,
             0
         );
+
+        if (backlash_compensation_in_progress()) {
+            // Ignoring MOTOR_STOP_EVENT during backlash comp
+            events &= ~MOTOR_STOP_EVENT;
+        }
         
         if (events & MOTOR_STOP_EVENT) {
             ESP_LOGI(TAG, "Stopping all motors");

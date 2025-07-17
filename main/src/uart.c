@@ -56,7 +56,10 @@ cmd_id_t uart_parse_command(char *cmd) {
 
         case 'C':
             if (cmd[1] == 'R') return CROSS;
-            if (cmd[1] == 'A') return CALIBRATE_BACKLASH;
+            break;
+        
+        case 'B':
+            return BACKLASH_COMP;
             break;
         
         default:
@@ -189,8 +192,15 @@ void uart_process_input(char *input) {
             break;
         }
 
-        case CALIBRATE_BACKLASH: {
-            calculate_backlash();
+        case BACKLASH_COMP: {
+            char *arg = strtok(NULL, " ");
+
+            if (!strcmp(arg, "CALI")) {
+                calculate_backlash();
+            } else
+                backlash_comp_enable(atoi(arg));
+    
+
             break;
         }
 

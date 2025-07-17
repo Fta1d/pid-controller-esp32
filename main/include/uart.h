@@ -32,7 +32,7 @@ typedef enum {
     CROSS,
     AA_SYS,
     SET,
-    CALIBRATE_BACKLASH,
+    BACKLASH_COMP,
     ERR
 } cmd_id_t;
 

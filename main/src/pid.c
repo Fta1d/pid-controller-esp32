@@ -1,4 +1,5 @@
 #include "pid.h"
+#include "backlash_compensator.h"
 #include "esp_log.h"
 
 static const char *TAG = "PID";
@@ -152,7 +153,7 @@ void auto_aim_target(void) {
     } 
 
     ESP_LOGI(TAG, "DIR X: %d | Y: %d", x_motor.dir, y_motor.dir);
-    ESP_LOGI(TAG, "OUTPUT FREQ X: %d | Y: %d", x_motor.duty, y_motor.duty);
+    ESP_LOGI(TAG, "OUTPUT FREQ X: %d | Y: %d", (int)x_motor.duty, (int)y_motor.duty);
 
     xEventGroupSetBits(motor_control_event_group, MOTOR_UPDATE_EVENT_X | MOTOR_UPDATE_EVENT_Y);
 
@@ -168,7 +169,7 @@ static void pid_task(void *pvParameters) {
     TickType_t last_wake_time = xTaskGetTickCount();
 
     while (1) {
-        if (aa_system.auto_aim_active) {
+        if (aa_system.auto_aim_active && !backlash_compensation_in_progress()) {
             auto_aim_target();
         }
 
