@@ -36,7 +36,7 @@ static auto_aim_system_t aa_system = {
     .target_x = 0,
     .target_y = 0,
     .precision_threshold = 0.8,
-    .work_freq = pdMS_TO_TICKS(20)
+    .work_freq = pdMS_TO_TICKS(10)
 };
 
 void pid_set_kp(float kp) {

@@ -2,6 +2,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <stdatomic.h>
+#include "driver/mcpwm_timer.h"
+#include "driver/mcpwm_oper.h"
+#include "driver/mcpwm_cmpr.h"
+#include "driver/mcpwm_gen.h"
 
 #include "motor.h"
 #include "encoder.h"
@@ -10,6 +14,23 @@
 
 static const char *TAG = "MOTOR";
 static volatile bool pass_encoder = false;
+
+// MCPWM handles
+static mcpwm_timer_handle_t x_timer = NULL;
+static mcpwm_timer_handle_t y_timer = NULL;
+static mcpwm_oper_handle_t x_operator = NULL;
+static mcpwm_oper_handle_t y_operator = NULL;
+static mcpwm_cmpr_handle_t x_comparator_a = NULL;
+static mcpwm_cmpr_handle_t x_comparator_b = NULL;
+static mcpwm_cmpr_handle_t y_comparator_a = NULL;
+static mcpwm_cmpr_handle_t y_comparator_b = NULL;
+static mcpwm_gen_handle_t x_gen_a = NULL;
+static mcpwm_gen_handle_t x_gen_b = NULL;
+static mcpwm_gen_handle_t y_gen_a = NULL;
+static mcpwm_gen_handle_t y_gen_b = NULL;
+
+#define MCPWM_TIMER_RESOLUTION_HZ 1000000 // 1MHz, 1us per tick
+#define MCPWM_PERIOD_TICKS        120    // 120us = 83kHz frequency
 
 void motor_set_pass_encoder(bool pass) {
     pass_encoder = pass;
@@ -21,77 +42,122 @@ bool motor_get_pass_encoder(void) {
 }
 
 esp_err_t motor_init_pwm(void) {
-    ESP_LOGI(TAG, "Initializing PWM for motors...");
+    ESP_LOGI(TAG, "Initializing MCPWM for motors...");
 
-    ledc_timer_config_t timer_config = {
-        .speed_mode = LEDC_MODE,
-        .timer_num = LEDC_TIMER,
-        .duty_resolution = LEDC_TIMER_RES,
-        .freq_hz = LEDC_FREQUENCY,
-        .clk_cfg = LEDC_CLK
+    mcpwm_timer_config_t x_timer_config = {
+        .group_id = 0,
+        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
+        .resolution_hz = MCPWM_TIMER_RESOLUTION_HZ,
+        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
+        .period_ticks = MCPWM_PERIOD_TICKS,
     };
-    ESP_ERROR_CHECK(ledc_timer_config(&timer_config));
+    ESP_ERROR_CHECK(mcpwm_new_timer(&x_timer_config, &x_timer));
 
-    ledc_channel_config_t pwm_channels[] = {
-        {
-            .channel    = X_IN1_LEDC_CHANNEL,
-            .duty       = 0,
-            .gpio_num   = X_MOTOR_IN1_PIN,
-            .speed_mode = LEDC_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_TIMER
-        },
-        {
-            .channel    = X_IN2_LEDC_CHANNEL,
-            .duty       = 0,
-            .gpio_num   = X_MOTOR_IN2_PIN,
-            .speed_mode = LEDC_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_TIMER
-        },
-        {
-            .channel    = Y_IN1_LEDC_CHANNEL,
-            .duty       = 0,
-            .gpio_num   = Y_MOTOR_IN1_PIN,
-            .speed_mode = LEDC_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_TIMER
-        },
-        {
-            .channel    = Y_IN2_LEDC_CHANNEL,
-            .duty       = 0,
-            .gpio_num   = Y_MOTOR_IN2_PIN,
-            .speed_mode = LEDC_MODE,
-            .hpoint     = 0,
-            .timer_sel  = LEDC_TIMER
-        }
+    mcpwm_timer_config_t y_timer_config = {
+        .group_id = 0,
+        .clk_src = MCPWM_TIMER_CLK_SRC_DEFAULT,
+        .resolution_hz = MCPWM_TIMER_RESOLUTION_HZ,
+        .count_mode = MCPWM_TIMER_COUNT_MODE_UP,
+        .period_ticks = MCPWM_PERIOD_TICKS,
     };
+    ESP_ERROR_CHECK(mcpwm_new_timer(&y_timer_config, &y_timer));
 
-    for (size_t i = 0; i < PWM_CHANNELS_NUM; i++) {
-        ESP_ERROR_CHECK(ledc_channel_config(&pwm_channels[i]));
-    }
+    mcpwm_operator_config_t x_operator_config = {
+        .group_id = 0,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_operator(&x_operator_config, &x_operator));
 
-    ESP_ERROR_CHECK(ledc_fade_func_install(0));
-    
-    ESP_LOGI(TAG, "PWM initialized successfully");
+    mcpwm_operator_config_t y_operator_config = {
+        .group_id = 0,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_operator(&y_operator_config, &y_operator));
+
+    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(x_operator, x_timer));
+    ESP_ERROR_CHECK(mcpwm_operator_connect_timer(y_operator, y_timer));
+
+    mcpwm_comparator_config_t x_comparator_config = {};
+    ESP_ERROR_CHECK(mcpwm_new_comparator(x_operator, &x_comparator_config, &x_comparator_a));
+    ESP_ERROR_CHECK(mcpwm_new_comparator(x_operator, &x_comparator_config, &x_comparator_b));
+
+    mcpwm_comparator_config_t y_comparator_config = {};
+    ESP_ERROR_CHECK(mcpwm_new_comparator(y_operator, &y_comparator_config, &y_comparator_a));
+    ESP_ERROR_CHECK(mcpwm_new_comparator(y_operator, &y_comparator_config, &y_comparator_b));
+
+    mcpwm_generator_config_t x_gen_a_config = {
+        .gen_gpio_num = X_MOTOR_IN1_PIN,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_generator(x_operator, &x_gen_a_config, &x_gen_a));
+
+    mcpwm_generator_config_t x_gen_b_config = {
+        .gen_gpio_num = X_MOTOR_IN2_PIN,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_generator(x_operator, &x_gen_b_config, &x_gen_b));
+
+    mcpwm_generator_config_t y_gen_a_config = {
+        .gen_gpio_num = Y_MOTOR_IN1_PIN,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_generator(y_operator, &y_gen_a_config, &y_gen_a));
+
+    mcpwm_generator_config_t y_gen_b_config = {
+        .gen_gpio_num = Y_MOTOR_IN2_PIN,
+    };
+    ESP_ERROR_CHECK(mcpwm_new_generator(y_operator, &y_gen_b_config, &y_gen_b));
+
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(x_gen_a,
+        MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(x_gen_b,
+        MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(y_gen_a,
+        MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+    ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(y_gen_b,
+        MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+
+    ESP_ERROR_CHECK(mcpwm_timer_enable(x_timer));
+    ESP_ERROR_CHECK(mcpwm_timer_enable(y_timer));
+
+    ESP_ERROR_CHECK(mcpwm_timer_start_stop(x_timer, MCPWM_TIMER_START_NO_STOP));
+    ESP_ERROR_CHECK(mcpwm_timer_start_stop(y_timer, MCPWM_TIMER_START_NO_STOP));
+
+    ESP_LOGI(TAG, "MCPWM initialized successfully");
     return ESP_OK;
 }
 
-void motor_stop(motor_channels_t *motor) {
-    ledc_set_duty(LEDC_MODE, motor->in1_channel, 0);
-    ledc_set_duty(LEDC_MODE, motor->in2_channel, 0);
-    ledc_update_duty(LEDC_MODE, motor->in1_channel);
-    ledc_update_duty(LEDC_MODE, motor->in2_channel);
+static void motor_set_pwm_duty(mcpwm_gen_handle_t gen, mcpwm_cmpr_handle_t cmpr, uint32_t duty) {
+    uint32_t duty_ticks = (duty * MCPWM_PERIOD_TICKS) / MAX_PWM_DUTY;
+    if (duty_ticks > MCPWM_PERIOD_TICKS) duty_ticks = MCPWM_PERIOD_TICKS;
+    
+    if (duty == 0) {
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(gen,
+            MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_LOW)));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(gen,
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, cmpr, MCPWM_GEN_ACTION_LOW)));
+    } else {
+        ESP_ERROR_CHECK(mcpwm_comparator_set_compare_value(cmpr, duty_ticks));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_timer_event(gen,
+            MCPWM_GEN_TIMER_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, MCPWM_TIMER_EVENT_EMPTY, MCPWM_GEN_ACTION_HIGH)));
+        ESP_ERROR_CHECK(mcpwm_generator_set_action_on_compare_event(gen,
+            MCPWM_GEN_COMPARE_EVENT_ACTION(MCPWM_TIMER_DIRECTION_UP, cmpr, MCPWM_GEN_ACTION_LOW)));
+    }
+}
+
+void motor_stop(char motor) {
+    if (motor == 'X') {
+        motor_set_pwm_duty(x_gen_a, x_comparator_a, 0);
+        motor_set_pwm_duty(x_gen_b, x_comparator_b, 0);
+    } else if (motor == 'Y') {
+        motor_set_pwm_duty(y_gen_a, y_comparator_a, 0);
+        motor_set_pwm_duty(y_gen_b, y_comparator_b, 0);
+    }
 
     x_state = MOTOR_STOPPED;
     y_state = MOTOR_STOPPED;
 }
 
 void motor_stop_all(void) {
-    motor_stop(&motor_x_channels);
+    motor_stop('X');
     x_motor.duty = 0;
 
-    motor_stop(&motor_y_channels);
+    motor_stop('Y');
     y_motor.duty = 0;
 }
 
@@ -104,14 +170,13 @@ uint16_t motor_speed_to_duty(float speed) {
     return duty;
 }
 
-void motor_set_speed_analog(motor_channels_t *motor, uint32_t speed, bool forward) {
+void motor_set_speed_analog(char motor, uint32_t speed, bool forward) {
     static uint32_t last_x_speed = 0;
     static uint32_t last_y_speed = 0;
-
     static bool last_x_direction = true;
     static bool first_x_move = true;
     
-    if (motor == &motor_x_channels) {
+    if (motor == 'X') {
         motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
                                      (forward ? MOTOR_BACKWARD : MOTOR_FORWARD);
         
@@ -132,7 +197,6 @@ void motor_set_speed_analog(motor_channels_t *motor, uint32_t speed, bool forwar
                 last_x_speed = 0;
                 
                 x_state = desired_state;
-                // last_x_speed = speed;
                 last_x_direction = forward;
                 first_x_move = false;
                 return;  
@@ -146,7 +210,7 @@ void motor_set_speed_analog(motor_channels_t *motor, uint32_t speed, bool forwar
         x_state = desired_state;
         last_x_speed = speed;
         
-    } else if (motor == &motor_y_channels) {
+    } else if (motor == 'Y') {
         motor_state_t desired_state = (speed == 0) ? MOTOR_STOPPED : 
                                      (forward ? MOTOR_FORWARD : MOTOR_BACKWARD);
 
@@ -159,25 +223,31 @@ void motor_set_speed_analog(motor_channels_t *motor, uint32_t speed, bool forwar
     }
 
     if (speed == 0) {
-        ledc_set_duty(LEDC_MODE, motor->in1_channel, 0);
-        ledc_set_duty(LEDC_MODE, motor->in2_channel, 0);
-        ledc_update_duty(LEDC_MODE, motor->in1_channel);
-        ledc_update_duty(LEDC_MODE, motor->in2_channel);
+        motor_stop(motor);
         return; 
     }
 
-    if (!forward) {
-        ledc_set_duty(LEDC_MODE, motor->in1_channel, speed);
-        ledc_set_duty(LEDC_MODE, motor->in2_channel, 0);
-    } else {
-        ledc_set_duty(LEDC_MODE, motor->in2_channel, speed);
-        ledc_set_duty(LEDC_MODE, motor->in1_channel, 0);
+    if (motor == 'X') {
+        if (!forward) {
+            // IN1 = PWM, IN2 = 0
+            motor_set_pwm_duty(x_gen_a, x_comparator_a, speed);
+            motor_set_pwm_duty(x_gen_b, x_comparator_b, 0);
+        } else {
+            // IN1 = 0, IN2 = PWM
+            motor_set_pwm_duty(x_gen_a, x_comparator_a, 0);
+            motor_set_pwm_duty(x_gen_b, x_comparator_b, speed);
+        }
+    } else if (motor == 'Y') {
+        if (!forward) {
+            // IN1 = PWM, IN2 = 0
+            motor_set_pwm_duty(y_gen_a, y_comparator_a, speed);
+            motor_set_pwm_duty(y_gen_b, y_comparator_b, 0);
+        } else {
+            // IN1 = 0, IN2 = PWM
+            motor_set_pwm_duty(y_gen_a, y_comparator_a, 0);
+            motor_set_pwm_duty(y_gen_b, y_comparator_b, speed);
+        }
     }
-    ledc_update_duty(LEDC_MODE, motor->in1_channel);
-    ledc_update_duty(LEDC_MODE, motor->in2_channel);
-
-    // ESP_LOGI(TAG, "DUTY %d | %d", (int)ledc_get_duty(LEDC_MODE, motor->in1_channel), (int)ledc_get_duty(LEDC_MODE, motor->in2_channel));
-    // ESP_LOGI("MOTOR", "X state %d | Y state %d", (int)x_state, (int)y_state);
 }
 
 void motor_restore_states(void) {
@@ -225,7 +295,7 @@ bool motor_is_movement_allowed(char motor, bool dir, float angle) {
 }
 
 void motor_control_task(void *pvParameters) {
-    const TickType_t motor_control_freq = pdMS_TO_TICKS(20);
+    const TickType_t motor_control_freq = pdMS_TO_TICKS(10);
     EventBits_t events;
 
     while (1) {
@@ -256,19 +326,10 @@ void motor_control_task(void *pvParameters) {
         }
 
         if (events & MOTOR_UPDATE_EVENT_X) {
-            // if (!motor_is_movement_allowed('X', x_motor.dir, x_motor.angle)) {
-            //     ESP_LOGW(TAG, "X motor movement blockded by limit");
-            //     x_motor.duty = 0;
-            // } else {
-            //     ESP_LOGI(TAG, "Updating motor X: freq=%d, dir=%d",
-            //         (int)x_motor.duty, (int)x_motor.dir);
-            //     motor_set_speed_analog(&motor_x_channels, x_motor.duty, x_motor.dir);
-            // }
-
             ESP_LOGI(TAG, "Updating motor X: freq=%d, dir=%d", 
                    (int)x_motor.duty, (int)x_motor.dir);
 
-            motor_set_speed_analog(&motor_x_channels, x_motor.duty, x_motor.dir);
+            motor_set_speed_analog('X', x_motor.duty, x_motor.dir);
         }
         
         if (events & MOTOR_UPDATE_EVENT_Y) {
@@ -278,7 +339,7 @@ void motor_control_task(void *pvParameters) {
             } else  {
                 ESP_LOGI(TAG, "Updating motor Y: freq=%d, dir=%d", 
                    (int)y_motor.duty, (int)y_motor.dir);
-                motor_set_speed_analog(&motor_y_channels, y_motor.duty, y_motor.dir);
+                motor_set_speed_analog('Y', y_motor.duty, y_motor.dir);
             }
         }
 

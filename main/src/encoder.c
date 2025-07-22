@@ -201,7 +201,7 @@ static void encoder_task(void *pvParemeters) {
         if (y_motor.duty > 0 && y_state != MOTOR_STOPPED) {
             if ((!y_motor.dir && y_motor.angle >= MAX_Y_ANGLE) ||
                 (y_motor.dir && y_motor.angle <= MIN_Y_ANGLE)) {
-                    motor_stop(&motor_y_channels);
+                    motor_stop('Y');
                     ESP_LOGE(TAG, "Emergency stop Y at %.2f degrees", y_motor.angle);
             }
         }

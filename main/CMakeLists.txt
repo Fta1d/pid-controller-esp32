@@ -23,4 +23,5 @@ idf_component_register(
         lwip
         driver
         freertos
+        esp_driver_mcpwm
 )

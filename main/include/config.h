@@ -3,7 +3,10 @@
 
 #include <stdint.h>
 #include <stdbool.h>
-#include "driver/ledc.h"
+#include "driver/mcpwm_timer.h"
+#include "driver/mcpwm_oper.h"
+#include "driver/mcpwm_cmpr.h"
+#include "driver/mcpwm_gen.h"
 #include "driver/gpio.h"
 #include "driver/i2c_master.h"
 #include "driver/uart.h"
@@ -18,28 +21,20 @@
 #define INPUT_TRIGGER_PIN       GPIO_NUM_34
 
 // === PWM CONFIGURATION ===
-#define X_IN1_LEDC_CHANNEL      LEDC_CHANNEL_0
-#define X_IN2_LEDC_CHANNEL      LEDC_CHANNEL_1
-#define Y_IN1_LEDC_CHANNEL      LEDC_CHANNEL_2
-#define Y_IN2_LEDC_CHANNEL      LEDC_CHANNEL_3
-#define LEDC_TIMER              LEDC_TIMER_0
-#define LEDC_CLK                LEDC_APB_CLK
-#define LEDC_MODE               LEDC_HIGH_SPEED_MODE
-#define LEDC_TIMER_RES          LEDC_TIMER_12_BIT
-#define LEDC_FREQUENCY          4000
 #define PWM_CHANNELS_NUM        4
-#define MAX_PWM_DUTY            4095
-#define MIN_PWM_DUTY            3000
+#define MAX_PWM_DUTY            4095           
+#define MIN_PWM_DUTY            3000           
 #define DEFAULT_DUTY            4095
-#define DUTY_STEP               100
 
 // === I2C CONFIGURATION ===
 #define X_ENCODER_I2C_PORT      I2C_NUM_1
 #define X_ENCODER_SCL_PIN       GPIO_NUM_4
 #define X_ENCODER_SDA_PIN       GPIO_NUM_2
+
 #define Y_ENCODER_I2C_PORT      I2C_NUM_0
 #define Y_ENCODER_SCL_PIN       GPIO_NUM_22
 #define Y_ENCODER_SDA_PIN       GPIO_NUM_21
+
 #define I2C_FREQ_HZ             400000
 
 // === UART CONFIGURATION ===
@@ -67,6 +62,7 @@
 #define MAX_SHOOT_TIME          100
 #define DEF_SHOOT_TIME          50
 
+// === EVENT BITS ===
 #define MOTOR_UPDATE_EVENT_X    (1 << 0)
 #define MOTOR_UPDATE_EVENT_Y    (1 << 1)
 #define MOTOR_STOP_EVENT        (1 << 2)
@@ -92,17 +88,13 @@ typedef enum {
 
 // === STRUCTS ===
 typedef struct {
-    ledc_channel_t in1_channel;
-    ledc_channel_t in2_channel;
-    char name[2];
+    char name[2];                      
 } motor_channels_t;
 
 typedef struct {
     float angle;
-
     uint32_t duty;
     uint32_t duty_saved;
-
     bool dir;
     bool dir_saved;
     bool active;
@@ -116,4 +108,4 @@ extern motor_t y_motor;
 extern motor_state_t y_state;
 extern motor_state_t x_state;
 
-#endif // CONFIG_H      
+#endif // CONFIG_H

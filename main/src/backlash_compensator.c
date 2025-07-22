@@ -17,12 +17,10 @@ void skip_backlash(bool dir, uint32_t target_speed) {
     
     backlash_comp_handle.compensation_in_progress = true;
 
-    // Зберігаємо цільові значення
     x_motor.duty_saved = target_speed;
     x_motor.dir_saved = dir;
 
-    // НЕ зупиняємо мотор! Відразу запускаємо на максимальній швидкості
-    motor_set_speed_analog(&motor_x_channels, MAX_PWM_DUTY, dir);
+    motor_set_speed_analog('X', MAX_PWM_DUTY, dir);
     
     ESP_LOGI(TAG, "Compensating at max speed for %d ticks", 
              (int)backlash_comp_handle.backlash_in_ticks);
@@ -31,7 +29,7 @@ void skip_backlash(bool dir, uint32_t target_speed) {
     vTaskDelay(backlash_comp_handle.backlash_in_ticks);
     
     // Відновлюємо цільову швидкість
-    motor_set_speed_analog(&motor_x_channels, target_speed, dir);
+    motor_set_speed_analog('X', target_speed, dir);
     
     backlash_comp_handle.compensation_in_progress = false;
     

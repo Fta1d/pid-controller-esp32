@@ -213,7 +213,6 @@ esp_err_t lsm303_accel_init() {
 esp_err_t lsm303_mag_init() {
     ESP_LOGI(TAG, "Initializing LSM303DLHC magnetometer");
     
-    // Перевірка наявності пристрою
     if (!i2c_device_exists(LSM303DLHC_MAG_ADDR)) {
         ESP_LOGE(TAG, "Magnetometer not found at address 0x%02X", LSM303DLHC_MAG_ADDR);
         return ESP_ERR_NOT_FOUND;

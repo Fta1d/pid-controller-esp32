@@ -19,14 +19,10 @@ uint16_t shoot_time = DEF_SHOOT_TIME;
 gptimer_handle_t shot_timer = NULL;
 
 motor_channels_t motor_x_channels = {
-    .in1_channel = X_IN1_LEDC_CHANNEL,
-    .in2_channel = X_IN2_LEDC_CHANNEL,
     .name = "X"
 };
 
 motor_channels_t motor_y_channels = {
-    .in1_channel = Y_IN1_LEDC_CHANNEL,
-    .in2_channel = Y_IN2_LEDC_CHANNEL,
     .name = "Y"
 };
 
