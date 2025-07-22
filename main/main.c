@@ -18,14 +18,6 @@
 uint16_t shoot_time = DEF_SHOOT_TIME;
 gptimer_handle_t shot_timer = NULL;
 
-motor_channels_t motor_x_channels = {
-    .name = "X"
-};
-
-motor_channels_t motor_y_channels = {
-    .name = "Y"
-};
-
 EventGroupHandle_t motor_control_event_group;
 
 motor_t x_motor = {0};

@@ -88,10 +88,6 @@ typedef enum {
 
 // === STRUCTS ===
 typedef struct {
-    char name[2];                      
-} motor_channels_t;
-
-typedef struct {
     float angle;
     uint32_t duty;
     uint32_t duty_saved;
@@ -101,8 +97,6 @@ typedef struct {
 } motor_t;
 
 // === GLOBAL INSTANCES ===
-extern motor_channels_t motor_x_channels;
-extern motor_channels_t motor_y_channels;
 extern motor_t x_motor;
 extern motor_t y_motor;
 extern motor_state_t y_state;
